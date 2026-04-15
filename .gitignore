@@ -1,0 +1,25 @@
+# Secrets
+.env
+
+# Editor / tool local state
+.claude/
+.idea/
+.vscode/
+
+# Personal screenshots (may contain faces, addresses, real names)
+docs/pics/
+
+# Runtime state and generated output
+data/
+videos/
+events/
+logs/
+models/
+
+# Python build / cache
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+dist/
+build/

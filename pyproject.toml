@@ -1,0 +1,30 @@
+[project]
+name = "blink-watcher"
+version = "0.1.0"
+description = "Listen to Blink cloud events and download clips for post-processing"
+requires-python = ">=3.11"
+dependencies = [
+    "blinkpy>=0.23.0",
+    "aiohttp>=3.9",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    "python-dotenv>=1.0",
+    "tzdata>=2024.1; sys_platform == 'win32'",
+    "anthropic>=0.40",
+    "opencv-python>=4.9",
+    "numpy>=1.26",
+    "google-genai>=0.3",
+]
+
+[project.scripts]
+blink-watcher = "blink_watcher.main:cli"
+blink-describe = "blink_watcher.describe_video:main"
+blink-event = "blink_watcher.event_log:main"
+blink-chat = "blink_watcher.chat_bot:cli"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["blink_watcher*"]

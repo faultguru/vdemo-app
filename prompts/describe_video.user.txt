@@ -1,0 +1,55 @@
+# Unified user-turn instructions for both Gemini (full video) and Claude
+# (keyframe images) video-description calls. Each describer fills the
+# input-mode-specific placeholder {input_mode_block} and, when applicable,
+# {segments_block}.
+#
+# Template placeholders (substituted in Python via str.format):
+#   {duration_sec}      — clip duration in seconds
+#   {width}             — frame width in pixels
+#   {height}            — frame height in pixels
+#   {fps}               — source frames per second
+#   {num_segments}      — total motion segments detected by OpenCV
+#   {num_described}     — number of segments actually described (capped)
+#   {input_mode_block}  — describer-specific paragraph explaining how the
+#                         clip is delivered (full video vs. keyframes) and
+#                         listing YOLO ground-truth detections
+#   {segments_block}    — rendered list of segment time ranges + per-segment
+#                         YOLO detections (empty string for Claude)
+# Lines starting with '#' are stripped at load time and are NOT sent to the model.
+
+This is a {duration_sec}s surveillance clip ({width}x{height} @ {fps} fps). OpenCV motion detection found {num_segments} segment(s); the first {num_described} are described below.
+
+{input_mode_block}
+
+{segments_block}
+
+Your job is to report ONLY what is actually happening during each segment. A real event is a subject whose position, presence, pose, or action visibly changes. If nothing is meaningfully changing in a segment, it is NOISE — emit an event with object='noise' and empty details/description.
+
+For each segment, emit one event per distinct subject that is actually doing something. If multiple subjects are active, emit multiple events with the same segment_index.
+
+STRICT RULES:
+(1) Do not guess or infer. If you cannot clearly see a subject change or act, do not invent one. In particular, NEVER state WHERE a package/object ends up unless you literally see it come to rest there. Opening a container, bin, door, mailbox, or gate is NOT the same as placing something inside it — describe what you see ("opens the container lid", "reaches toward the door") and stop there. If a person bends down and you do not clearly see contact between the object and a specific surface, say "places a package on the ground" only if you can see it touch the ground; otherwise say "bends down with a package" and leave the destination unspecified. Same rule for "hands something to someone", "puts something in the mailbox", "loads something into a car" — only say it if you directly see the hand-off / insertion / loading complete.
+(2) Do not describe anything stationary — parked vehicles, static people, scenery, timestamps, lighting, unchanging background are all noise.
+(3) Only describe what you can directly observe. Do not assume identity beyond what you can literally see. Describe what is happening SEMANTICALLY — the subject and the ACTION they are performing. NEVER use compass/cardinal phrases like "left to right", "right to left", "upward", "downward", "north", "south". NEVER mention frame entry/exit, "enters from the left", "leaves on the right", "appears at the top", "from off-screen" or any similar positional/spatial framing language. Keep it to the subject and what they are doing — nothing about where in the frame or from which side.
+(3a) WHEN A PERSON IS DETECTED, describe what they are DOING in concrete behavioral terms if you can see it: "dropping off a package", "picking up a package", "carrying a box", "walking a dog", "getting into a car", "getting out of a car", "opening the gate", "knocking on the door", "talking with someone", "checking the mailbox", "eating", "crouching down", "bending over to pick something up", "holding a phone". If you can only see them walking and cannot identify a specific action, say "A person walks across the driveway" (or yard/patio/path — whatever surface is under them). Do NOT invent actions you cannot see.
+(3b) VEHICLE TYPES: if you see a vehicle but cannot unambiguously see its body style (sedan vs SUV vs pickup vs van), use the generic word "car" or "vehicle". NEVER say "pickup truck", "SUV", "sedan", "van", etc. unless the body shape is clearly and unmistakably visible. Color is fine if clear; specific make/model is not.
+(3c) GROUND-TRUTH CLASSES: the YOLOv8 classes listed in the input-mode block (and per segment, when provided) are the ONLY object types known to be present. Use those class names for the 'object' field. Do NOT invent other object types. If YOLO found 'car', say 'car' — not 'truck', 'pickup', 'SUV', etc.
+(3d) CLEARLY-VISIBLE RULE: only report an event you can UNAMBIGUOUSLY see with your own eyes — the subject, the surface they interact with, and the action must all be directly observable. If the motion is a small blob at the edge of the frame, a distant figure on the street, a reflection, a shadow, rain, wind-driven foliage, or anything you would hesitate to point at and name, treat the segment as 'noise' and emit an empty description. When in doubt, prefer noise over a speculative narrative. Confabulating a story from a yellow pillow, a red decoration, or a car passing in the background is a FAILURE of this rule.
+(4) Be literal and conservative. 'details' must only contain attributes you can actually see; leave it empty if unsure.
+(5) 'description' is a single sentence stating what the subject is literally doing — no embellishment.
+(6) Use a short, concrete noun for 'object'.
+(7) If NOTHING is actually happening during a segment, emit a single event with object='noise' and empty details/description. Prefer 'noise' over a fabricated event.
+(8) The 'summary.description' must ONLY describe changing subjects and what they are doing. NEVER mention parked cars, stationary people, trash cans, foliage, or any other unchanging element — not even as "context", "background", or with phrases like "remains parked", "stays stationary", "is still there". Unchanging things simply do not exist for the purposes of the summary. If nothing changes at all, summary.description is "No motion.".
+(9) OUTPUT STYLE: write 'overall_summary' and each 'description' as natural human language, as if describing the clip to another person. NEVER mention "the video", "the clip", "the segments", "the time range", "the keyframes", "the frames", "the images", "the analysis", or any other internal/technical terminology. Write what happens, not how you determined it.
+(10) IMPORTANT FRAMES: populate 'important_frames_sec' with 2–6 timestamps (in seconds from the start of the clip as you see it) of the single most informative moments across all real events — e.g. the moment a person reaches the doorstep, the moment a package is set down, the moment a car is fully in view. Pick DISTINCT moments; do not include near-duplicates. Skip segments that are pure noise.
+(11) THUMBNAIL: populate 'thumbnail_sec' with the single best timestamp for a thumbnail — the one frame that captures what the whole clip is about. It MUST be one of the values in 'important_frames_sec'. Prefer the moment the main action is clearest: the package being set down, the person's face visible, the vehicle broadside in view. If there is no real motion, return an empty 'important_frames_sec' list and thumbnail_sec = -1.0.
+
+(12) SUMMARY DESCRIPTION: populate 'summary.description' with a 2–3 sentence natural-language account of everything that actually happens in the clip. It must explicitly narrate package drop-offs and pick-ups when the before/after hand-state evidence supports it (per the OBJECT TRANSFER RULE in the system prompt). Never say "walks away carrying a package" when you actually saw a pick-up — say "picks up a package" instead.
+
+(13) SUMMARY ACTIONS: populate 'summary.actions' with the HEADLINE action enums for the whole clip — only the notable events that would be worth a push notification, such as 'package_dropoff', 'package_pickup', 'person_knocking', 'vehicle_arriving', 'person_entering_vehicle'. Skip 'person_walking' unless walking is the only thing that happens in the entire clip. Pick from the fixed action enum — do NOT invent new values.
+
+(14) PEOPLE: populate 'summary.people' with one entry per distinct person, merging the same person across segments into a single entry — do NOT duplicate. For each person, 'appearance' is a short noun phrase that leads with STABLE physical traits (approximate height, build, hair length and color) and avoids clothing — e.g. "tall adult with dark hair", "short child with long blonde hair", "delivery person" only when there is a visible uniform, branding, or clipboard; otherwise just "person". 'appearance_details' is a comma-separated list of literally-visible attributes ordered STABLE-FIRST: start with physical traits (estimated height, build, hair length + color, facial hair if any, visible skin tone), then add clothing, headwear, footwear, accessories afterwards. Clothing changes day to day so it must NOT be the primary identifier — empty string if too far or blurry. 'type' is one of 'kid' (roughly under 13), 'teen' (13–19), 'adult' (20–59), 'senior' (60+), 'delivery_person' (visible uniform, branding, package, or clipboard indicating courier/parcel delivery), 'mail_carrier' (USPS/postal uniform or mail bag), 'police' (uniform, badge, or marked vest), 'service_worker' (visible trade uniform such as plumber, electrician, landscaper, technician), 'visitor' (adult arriving at the door without any service context), or 'unknown' when you cannot tell from body proportions / gait / face / uniform. Prefer the most specific role over a plain age bucket — e.g., an adult delivery driver is 'delivery_person', not 'adult'; 'estimated_age' is a single integer best-guess of the person's age in years, or null when you cannot tell — do not invent a number if the evidence is insufficient; 'actions' lists every action enum the person performs across the clip (including walking); 'objects' lists every object enum the person is seen holding or carrying, picked from the fixed object enum.
+
+(15) VEHICLES: populate 'summary.vehicles' with one entry per distinct vehicle using the same 'appearance' / 'appearance_details' / 'actions' shape. Empty list if no vehicles.
+
+(16) ENUM DISCIPLINE: 'summary.actions', 'people[].actions', 'vehicles[].actions', and 'people[].objects' are CLOSED enums enforced by the response schema. If an action or object you would like to report is not in the enum, either pick the closest enum value or omit it — NEVER emit a value not in the enum. If no real motion occurs, set 'summary.actions' to [] and 'summary.people' / 'summary.vehicles' to [].
