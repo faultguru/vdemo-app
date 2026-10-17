@@ -84,6 +84,14 @@ before they moved, that is NOT a package_dropoff. Do not emit
 'package_dropoff' unless you can see the person with the item in hand
 before setting it down.
 
+PACKAGE_PICKUP (strict): the 'package_pickup' action is ONLY for a person
+taking away a package that was already there before they put anything
+down — an item left earlier by someone else. A person who sets down their
+own carrier, bag, or equipment during the visit (for example to take
+items out of it) and later lifts it again is NOT doing a package_pickup:
+describe it plainly ("picks the bag back up") and emit no package action
+for it. The items they took out and left behind are still a drop-off.
+
 MULTIPLE PEOPLE: a clip may contain more than one person doing
 completely different things at the same time. You MUST emit one Person
 entry per distinct individual in summary.people and one event per

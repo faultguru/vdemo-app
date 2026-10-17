@@ -584,15 +584,62 @@ class GeminiDescriber(VideoDescriber):
                     pass
 
 
+# ---------- Claude via `claude -p` ----------
+
+class ClaudeCliDescriber(VideoDescriber):
+    """Claude through the headless Claude Code CLI (`claude -p`, your Claude
+    Code login) on frames picked by frame_sampler from a trimmed copy of the
+    clip — ~1 fps over the whole motion span plus dense bursts around
+    bends/entries/exits, all cropped to the activity region — instead of
+    ClaudeDescriber's 8 keyframes per segment.
+    Prompt and request files: see describe_keyframes."""
+
+    provider = "claude-cli"
+
+    def describe(
+        self,
+        video_path: Path,
+        segments: "list[MotionSegment]",
+        frames_bgr: dict[int, np.ndarray],
+        info: dict,
+    ) -> tuple[VideoAnalysis, dict]:
+        if not segments:
+            return VideoAnalysis(summary=_empty_summary("No motion detected.", ignore=True), events=[]), {}
+
+        # Local imports: both modules import this one.
+        from blink_watcher.describe_keyframes import analyze_keyframes
+        from blink_watcher.frame_sampler import sample_frames
+
+        with tempfile.TemporaryDirectory(prefix=f"{video_path.stem}.frames.") as tmp:
+            frames_dir = Path(tmp)
+            sample_frames(video_path, frames_dir, info=info, segments=segments)
+            parsed, meta = analyze_keyframes(frames_dir, self.model, backend="cli")
+        if parsed is None:
+            raise RuntimeError(
+                f"claude -p returned no structured output (stop_reason={meta.get('stop_reason')}): "
+                f"{(meta.get('raw_text') or '')[:500]}"
+            )
+        # Claude saw the trimmed video's timeline — shift back so the caller
+        # can seek the original file.
+        offset = (meta.get("trim") or {}).get("offset_sec") or 0.0
+        if offset:
+            parsed.important_frames_sec = [round(t + offset, 3) for t in parsed.important_frames_sec]
+            if parsed.thumbnail_sec >= 0:
+                parsed.thumbnail_sec = round(parsed.thumbnail_sec + offset, 3)
+        return parsed, meta.get("usage") or {}
+
+
 # ---------- Factory ----------
 
 def make_describer() -> VideoDescriber:
     provider = os.getenv("VIDEO_DESCRIBER", "claude").strip().lower()
     if provider == "claude":
         return ClaudeDescriber(os.getenv("CLAUDE_MODEL", "claude-haiku-4-5"))
+    if provider == "claude-cli":
+        return ClaudeCliDescriber(os.getenv("CLAUDE_MODEL", "claude-sonnet-5-5"))
     if provider == "gemini":
         model = os.getenv("GEMINI_VIDEO_MODEL")
         if not model:
             raise SystemExit("GEMINI_VIDEO_MODEL must be set in .env")
         return GeminiDescriber(model)
-    raise SystemExit(f"Unknown VIDEO_DESCRIBER={provider!r} (expected 'claude' or 'gemini')")
+    raise SystemExit(f"Unknown VIDEO_DESCRIBER={provider!r} (expected 'claude', 'claude-cli' or 'gemini')")

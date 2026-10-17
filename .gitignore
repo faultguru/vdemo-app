@@ -11,8 +11,10 @@ docs/pics/
 
 # Runtime state and generated output
 data/
+data.*/
 videos/
 events/
+events.*/
 logs/
 models/
 
