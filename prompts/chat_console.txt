@@ -1,0 +1,8 @@
+# Appended to the chat agent's system prompt (under "## This chat") when it
+# answers in the web console (blink_watcher.webui; ChatAgent console mode).
+You are answering in the web monitoring console, not in Telegram. Long-term
+memory is read-only here and there are no day notes: you cannot save, change
+or forget anything, so the memory and day-note tools mentioned above do not
+exist in this chat. If the user asks you to remember something, say it can be
+saved from the Telegram chat. Pictures and videos you send appear in the
+console.

@@ -1,214 +1,129 @@
 # blink-watcher
 
-A home-security pipeline that listens to Blink cloud motion events,
-downloads each clip, runs it through an LLM video describer
-(Claude or Gemini), writes structured event records to disk, and
-exposes a Telegram chat agent that can answer questions about what
-happened, send pictures and videos, and suppress duplicate alerts
-using a lightweight daily-memory system.
+A home-security assistant for cloud cameras. It downloads every motion clip
+from the camera provider (Blink today), throws away the ones where nothing
+happens using plain computer vision (OpenCV motion, YOLO person check), has an
+LLM describe the ones that matter from a handful of key frames, and lets a
+chat agent decide which events are worth a Telegram message. You can talk to
+the same agent on Telegram ("who was that?", "show me the video", "don't
+tell me about the gardener today") and from a local web console that also
+shows the day's events, groups related clips into activities and has a live
+view of the cameras.
 
-**End-to-end shape:** Blink → SQLite clip queue → describer → event
-JSON → notifier LLM → Telegram. All state lives on the local disk;
-the only external services are Blink, your chosen describer provider,
-and the Telegram Bot API.
+## How it works
 
-See [`docs/README.md`](docs/README.md) for the full architecture
-overview, sub-docs, and worked examples.
+```
+ camera cloud (Blink)
+        |  clips + the provider's own detections
+        v
+ [fetch]    download new clips -> videos.raw/   queue -> videos.processed/inbox/
+        |
+        v
+ [process]  triage -> OpenCV motion -> YOLO person check      (no AI; most clips stop here)
+            trim to the activity -> sample key frames -> LLM description (told the security mode)
+            security mode HOME: indoor cameras' clips saved as they are, no analysis
+            -> videos.processed/ (clip, thumbnail, .metadata.json)    queue -> chat/events-inbox/
+        |
+        v
+ [notify]   chat agent: send or skip? (long-term memory, today's notes, earlier events)
+            -> chat/<date>/events.json   message -> chat/outbox/
+        |
+        v
+ [chat-bot] Telegram: sends the outbox, answers your messages (same chat agent + tools)
 
-## Install
-
-```bash
-pip install -e .
+ [webui]    local console: events, activities (stitch), clips in the pipeline,
+            live monitor, chat with the analyst, configuration page,
+            security mode (NORMAL / HOME / AWAY / VACATION; also /home, /away... on Telegram)
 ```
 
-Python 3.11+ required. YOLOv8 weights (`yolov8s.pt`) are expected in
-`models/` — on first run Ultralytics will download them automatically
-if the file isn't already there.
+Each box is a separate service (its own process). They only talk through
+files in the storage areas, so each one can be stopped, restarted or rerun on
+its own. `python -m blink_watcher run` starts them all.
 
-## Configuration
+The camera provider and the LLM provider are both behind small interfaces
+(`blink_watcher.providers`, `blink_watcher.ai`): Blink and Claude (through the
+`claude` CLI or the Messages API) are implemented; see
+[docs/architecture.md](docs/architecture.md) for adding e.g. Ring or Gemini.
 
-All runtime knobs live in `.env`; nothing sensitive is hardcoded in
-source. Copy the example and fill in your values:
+## Quick start
+
+Requirements: Python 3.11+, the [`claude` CLI](https://docs.claude.com/en/docs/claude-code)
+signed in (`claude` once) for the default LLM provider, a Blink account and a
+Telegram bot (from @BotFather).
 
 ```bash
-cp .env.example .env
-# edit .env and set BLINK_USERNAME / BLINK_PASSWORD / GEMINI_API_KEY / ...
+pip install -e .                    # extras: .[claude-api] .[gemini] .[directml] .[diagnostics]
+cp .env.example .env                # then set at least BLINK_USERNAME, BLINK_PASSWORD, CAMERAS,
+                                    # TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+python -m blink_watcher fetch --list    # first Blink login (asks for the 2FA PIN Blink e-mails:
+                                        # rerun with BLINK_2FA_CODE=<pin>)
+python -m blink_watcher run         # every service; Ctrl+C stops them all
 ```
 
-`.env` is already in `.gitignore` — never commit it. The full list
-of supported variables (with inline comments) lives in
-[`.env.example`](.env.example).
-
-Claude users: authentication piggybacks on the OAuth token from
-`~/.claude/.credentials.json` — run `claude` once to sign in. No API
-key goes in `.env` for Claude.
+`run.ps1` / `run.sh` do the same from the project folder (using `.venv` when
+there is one). The console is at http://127.0.0.1:9090; its configuration page
+(`/settings`) edits `.env` with every option documented, and shows the
+cameras as a table: each camera's Enabled switch and Download filter
+(Always / Person / Person or vehicle).
 
 ## Commands
 
-All commands are installed as console scripts by `pip install -e .`.
+`python -m blink_watcher <command> [options]` (or the `blink-watcher` script);
+`<command> --help` shows the options.
 
-### `blink-watcher` — live poller + downloader
+| command     | what it does |
+|-------------|--------------|
+| `run`       | every service below in one console (`--only webui`, `--skip chat-bot`); restarts a service that crashes |
+| `fetch`     | download clips (`--daemon`: keep polling; `--date`, `--camera`, `--list`, `--limit`) |
+| `process`   | analyze and describe queued clips (`--daemon`; `--limit`, `--preserve`, `--redo` for testing) |
+| `notify`    | the chat agent's send / skip decision for each new event (`--daemon`) |
+| `chat-bot`  | the Telegram bot: sends notifications, answers messages |
+| `webui`     | the local web console (`--host`, `--port`) |
+| `stitch`    | print a day's activities and why clips were linked (tune `STITCH_*`) |
+| `describe`  | run the LLM describer on one clip's sampled frames |
+| `frames`    | sample (and trim) a clip's frames the way the describer does, no LLM |
+| `hwmonitor` | log GPU / CPU / RAM load every few seconds, crash-safe (diagnostics) |
 
-```bash
-blink-watcher run                              # live poll + download loop
-blink-watcher backfill --hours 24              # backfill last 24h
-blink-watcher backfill --days 3 --then-live    # backfill then transition to live
-blink-watcher backfill --hours 6 --dry-run     # count clips without downloading
-blink-watcher backfill --hours 6 --restart     # ignore saved cursor
-blink-watcher telegram "hello"                 # send a one-shot Telegram message
-blink-watcher telegram "*bold*" --markdown
-```
+The services can also be run one per terminal, e.g. `python -m blink_watcher
+process --daemon`. Without `--daemon`, `fetch`, `process` and `notify` do one
+batch and exit.
 
-### `blink-describe` — run the video describer on a clip
+## Configuration
 
-```bash
-blink-describe path/to/clip.mp4
-```
+Everything is configured in `.env` at the project root (environment variables
+override it). [`.env.example`](.env.example) documents every option, grouped,
+with the services that need a restart after a change; the web console's
+configuration page is generated from it. Secrets (Blink password, Telegram
+token) are only ever written to `.env`, never shown back.
 
-Writes structured analysis JSON alongside the clip. See
-[`docs/video_analysis.md`](docs/video_analysis.md) for the pipeline
-(OpenCV triage → motion segmentation → YOLOv8 → LLM) and the output
-schema.
+The Claude providers use your Claude Code login — no API key in `.env`.
 
-### `blink-event` — event-log utilities
+## Where files live
 
-```bash
-blink-event --help
-```
+Everything the services write goes under `STORAGE_ROOT` (default
+`./data-storage`):
 
-Appends and queries records in `events/events.<DATE>.json`. See
-[`docs/event_loading.md`](docs/event_loading.md) for how an event
-travels from the camera to a notifier-ready outbox file.
+| folder              | contents |
+|---------------------|----------|
+| `videos.raw/`       | clips as downloaded + their `.metadata.json`, `<date>/<Camera_Name>/<stamp>.mp4` |
+| `videos.processed/` | kept clips (trimmed), thumbnails, full analysis metadata, `.event.json`; `inbox/` = queue of the video processor |
+| `videos.ignored/`   | `.metadata.json` of clips that were dropped, with who dropped them and why |
+| `videos.temp/`      | per-clip work folders while a clip is processed (frames, LLM requests) |
+| `videos.live/`      | live monitor snapshots (kept `WEBUI_LIVE_KEEP_HOURS`) |
+| `chat/`             | long-term memory, day notes, each day's `events.json`, chat history, `events-inbox/`, `outbox/` |
+| `state/`            | camera provider session (`state/blink/session.json`), camera catalog (`state/cameras.json`) |
+| `logs/`             | one rotating log per service (`fetch.log`, `process.log`, ..., `run.log`), `chat_prompts.log` |
+| `models/`           | YOLO weights (downloaded on first use) |
 
-### `blink-chat` — Telegram notifier + chat agent
-
-```bash
-blink-chat
-# equivalent to: python -m blink_watcher.chat_bot
-```
-
-Runs two concurrent loops in one process:
-
-- **Notifier** — drains `events/outbox/*.json` and decides whether
-  each event deserves an alert. Produces a tone-tagged Telegram
-  message (`<cautious>` / `<friendly>` / `<informative>`) or emits
-  `SKIP: <reason>` to suppress.
-- **Chat agent** — long-polls Telegram for messages from the
-  authorized `TELEGRAM_CHAT_ID` and answers them with
-  `GEMINI_CHAT_MODEL`.
-
-See [`docs/chatbots.md`](docs/chatbots.md) for the full wiring.
-
-**Chat-agent function-calling tools:**
-
-| Tool | Purpose |
-| --- | --- |
-| `list_event_dates` | Dates with recorded events |
-| `list_events(date)` | Compact summaries for one date |
-| `get_event_details(event_id)` | Full event JSON |
-| `send_thumbnail(event_id)` | Send the event thumbnail image |
-| `send_video(event_id)` | Send the full event video |
-| `remember` / `forget` | Identity-level persistent memory |
-| `note_today` / `clear_today` | Daily-scratchpad memory |
-| `get_day_notes(date)` | Read an older day's notes |
-
-**Sandbox:** all file access is restricted to `./events/`. Paths
-escaping via `..` or absolute paths are rejected.
-
-**Context:** per-chat sliding window of the last 10 user/model turns,
-persisted at `data/chat_history/<chat_id>.json`. Auto-notifications
-the notifier sent while the user was away are replayed into history
-so the chat agent knows what the user has already been told.
-
-**Memory:** two stores — persistent facts in `data/memory.md` (edited
-via `remember` / `forget`) and per-day scratchpad in
-`data/daily/YYYY-MM-DD.md` (edited via `note_today` / `clear_today`).
-See [`docs/memory.md`](docs/memory.md).
-
-**Example conversation:**
-
-```
-you: what happened today?
-bot: (list_event_dates → list_events) Two events — delivery drop-off
-     at 9:40 PM and a pickup at 9:51 PM.
-you: send me the thumbnail of the second one
-bot: (send_thumbnail) [photo delivered] SILENT
-you: that was my neighbour, let me know if you see them again
-bot: (note_today) OK, I'll alert you on any further sightings today.
-```
-
-## Layout
-
-```
-blink_watcher/
-  main.py              # blink-watcher CLI (run / backfill / telegram)
-  poller.py            # live event polling
-  backfill.py          # historical backfill
-  store.py             # SQLite clip queue (WAL mode)
-  downloader.py        # concurrent clip downloads
-  auth.py              # Blink login + session cache
-  blink_api.py         # blinkpy wrapper
-  describers.py        # Claude + Gemini video describers
-  describe_video.py    # blink-describe CLI (motion pipeline)
-  event_log.py         # blink-event CLI
-  event_tools.py       # sandboxed event-query tools
-  telegram.py          # Telegram Bot API client
-  chat_bot.py          # blink-chat entrypoint (notify + long-poll loops)
-  chat_agent.py        # dual-role Gemini agent (notifier + chat)
-  memory.py            # persistent identity memory
-  daily.py             # per-day ephemeral memory
-  config.py            # pydantic-settings .env loader
-prompts/               # hand-editable prompt files (#-comments stripped at load)
-  chat.system.txt
-  chat_notify.system.txt
-  describe_video.system.txt
-  describe_video.claude.user.txt
-  describe_video.gemini.user.txt
-models/                # YOLOv8 weights (gitignored)
-events/                # events.<DATE>.json + per-day clips/thumbnails + outbox/
-videos/                # raw downloaded clips
-data/                  # store.sqlite, sessions, chat_history/, memory.md, daily/
-logs/                  # chat_prompts.log + runtime logs
-docs/                  # architecture docs (start with docs/README.md)
-```
+Each storage area's folder and type are configurable (`<AREA>_PREFIX`,
+`<AREA>_STORAGE_TYPE`); only local disk exists today. All of these files are
+plain JSON / Markdown and safe to read; memory files are meant to be
+hand-editable.
 
 ## Documentation
 
-- [`docs/README.md`](docs/README.md) — architecture overview with
-  high-level diagram and module map.
-- [`docs/event_loading.md`](docs/event_loading.md) — how a motion
-  event travels from Blink to the outbox.
-- [`docs/video_analysis.md`](docs/video_analysis.md) — the describer
-  pipeline and output schema.
-- [`docs/chatbots.md`](docs/chatbots.md) — the notifier and chat
-  agent, sharing one `ChatAgent` instance.
-- [`docs/prompt_construction.md`](docs/prompt_construction.md) — how
-  system prompts are assembled, where memory gets injected.
-- [`docs/memory.md`](docs/memory.md) — persistent vs daily memory,
-  canonical line formats, hand-editing.
-- [`docs/examples.md`](docs/examples.md) — worked examples of every
-  file shape the pipeline produces.
-
-## Troubleshooting
-
-- **`getUpdates` returns nothing:** a webhook may be set on the bot.
-  Clear it: `curl "https://api.telegram.org/bot<TOKEN>/deleteWebhook"`.
-- **Gemini 404:** `GEMINI_CHAT_MODEL` or `GEMINI_VIDEO_MODEL` is an
-  invalid model id — swap to a valid one.
-- **Telegram "file too large":** Telegram bots cap uploads at 50 MB
-  for `sendVideo` / `sendDocument`.
-- **`GEMINI_API_KEY must be set`:** the Gemini describer and chat
-  agent both need it in `.env`; there is no default.
-- **`CAMERAS must list at least one camera name`:** the `CAMERAS`
-  env var is empty or missing. Comma-separate real camera names as
-  they appear in the Blink app.
-- **Claude auth fails:** run `claude` once to generate
-  `~/.claude/.credentials.json`. The describer reads `accessToken`
-  from that file — no API key needed.
-
-## Prompts
-
-All LLM prompts live in [`prompts/`](prompts/) as plain text. Lines
-starting with `#` are stripped at load time and never sent to the
-model, so you can leave editorial notes in-line. Prompt edits require
-a process restart to take effect.
+- [docs/architecture.md](docs/architecture.md) — packages, services, the camera and LLM provider interfaces (adding Ring, Gemini), settings, logging
+- [docs/video_analysis.md](docs/video_analysis.md) — the video processor: check, trim, frame sampling, the describer
+- [docs/chat.md](docs/chat.md) — the chat agent: notifications, Telegram chat, tools, memory and day notes, prompts
+- [docs/webui.md](docs/webui.md) — the web console, its API, the live monitor, activities, the configuration page
+- [docs/data_formats.md](docs/data_formats.md) — every file on disk and its format

@@ -1,0 +1,4 @@
+# Appended to the system prompt (under "## Answer format") of a chat agent
+# role without tools (event notifications) instead of agent_tools.txt.
+Answer with a JSON object: `tool_calls` always empty (there are no tools
+here), `reply` the final reply, and any other fields the answer format asks for.

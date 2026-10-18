@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sentinel Configuration</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #04060c; --bg2: #070b16; --panel: rgba(12, 22, 40, .72);
+  --line: rgba(0, 229, 255, .18); --line-strong: rgba(0, 229, 255, .45);
+  --text: #d7e7ff; --dim: #7d93b5; --faint: #47597a;
+  --cyan: #00e5ff; --magenta: #ff2bd6; --violet: #8b5cff; --green: #26ffa0; --amber: #ffb020; --red: #ff3b5c;
+  --glow-cyan: 0 0 12px rgba(0, 229, 255, .55), 0 0 32px rgba(0, 229, 255, .18);
+  --glow-red: 0 0 14px rgba(255, 59, 92, .7), 0 0 40px rgba(255, 59, 92, .25);
+  --head: "Orbitron", "Segoe UI", sans-serif; --body: "Rajdhani", "Segoe UI", sans-serif; --mono: "JetBrains Mono", Consolas, monospace;
+  --cut: 14px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--text); font: 500 16px/1.4 var(--body); overflow-x: hidden; }
+.backdrop { position: fixed; inset: 0; z-index: -2; overflow: hidden;
+  background: radial-gradient(900px 600px at 12% -10%, rgba(0,229,255,.13), transparent 60%),
+    radial-gradient(800px 600px at 110% 10%, rgba(255,43,214,.10), transparent 60%),
+    radial-gradient(900px 700px at 50% 120%, rgba(139,92,255,.12), transparent 60%), linear-gradient(180deg, var(--bg2), var(--bg)); }
+.backdrop::before { content: ""; position: absolute; inset: -50%;
+  background-image: linear-gradient(rgba(0,229,255,.07) 1px, transparent 1px), linear-gradient(90deg, rgba(0,229,255,.07) 1px, transparent 1px);
+  background-size: 48px 48px; transform: perspective(900px) rotateX(58deg) translateY(-8%); mask-image: linear-gradient(180deg, transparent 30%, #000 75%); }
+.cut { clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut)); }
+.panel { background: var(--panel); border: 1px solid var(--line); backdrop-filter: blur(10px); position: relative; }
+.wrap { max-width: 1320px; margin: 0 auto; padding: 18px 22px 140px; }
+
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 14px 20px; margin-bottom: 14px; position: sticky; top: 8px; z-index: 20; }
+header h1 { margin: 0; font: 900 18px var(--head); letter-spacing: .28em; color: #fff; text-shadow: var(--glow-cyan); }
+header h1 small { display: block; font: 600 10.5px var(--mono); letter-spacing: .2em; color: var(--dim); margin-top: 3px; text-shadow: none; }
+.back { color: var(--cyan); text-decoration: none; font: 700 11px var(--head); letter-spacing: .18em; border: 1px solid var(--line-strong); padding: 8px 12px; }
+.back:hover { box-shadow: var(--glow-cyan); color: #fff; }
+.seg { display: flex; border: 1px solid var(--line-strong); }
+.seg button { cursor: pointer; border: 0; background: transparent; color: var(--dim); font: 700 11px var(--head); letter-spacing: .18em; padding: 9px 14px; }
+.seg button.on { color: #fff; background: rgba(0,229,255,.16); box-shadow: inset 0 0 0 1px var(--cyan); }
+.seg button.on.adv { background: rgba(255,43,214,.16); box-shadow: inset 0 0 0 1px var(--magenta); }
+header input[type=search] { flex: 1; min-width: 200px; background: rgba(0,0,0,.35); border: 1px solid var(--line); color: var(--text); font: 600 15px var(--body); padding: 8px 10px; }
+.btn { cursor: pointer; display: inline-flex; align-items: center; gap: 8px; padding: 9px 14px; border: 1px solid var(--line-strong); background: rgba(0,229,255,.06);
+  color: var(--text); font: 700 11px/1 var(--head); letter-spacing: .14em; text-transform: uppercase; transition: all .15s; }
+.btn:hover:not(:disabled) { background: rgba(0,229,255,.18); color: #fff; box-shadow: var(--glow-cyan); }
+.btn:disabled { opacity: .35; cursor: not-allowed; }
+.btn.save { border-color: var(--green); color: var(--green); }
+.btn.save:not(:disabled) { background: rgba(38,255,160,.12); box-shadow: 0 0 14px rgba(38,255,160,.4); }
+.btn.alt { border-color: rgba(255,43,214,.5); background: rgba(255,43,214,.06); }
+.btn.sm { padding: 6px 9px; font-size: 10px; }
+.pending { font: 600 12px var(--mono); color: var(--amber); min-width: 90px; }
+
+.banner { padding: 12px 16px; margin-bottom: 14px; border-left: 3px solid var(--amber); background: rgba(255,176,32,.08); color: #ffe6b5; font-size: 15px; }
+.banner.err { border-color: var(--red); background: rgba(255,59,92,.1); color: #ffd3db; }
+.banner.ok { border-color: var(--green); background: rgba(38,255,160,.07); color: #c9ffe6; }
+.banner code { font: 600 13px var(--mono); color: #fff; background: rgba(0,0,0,.35); padding: 1px 6px; }
+
+.layout { display: grid; grid-template-columns: 230px 1fr; gap: 16px; align-items: start; }
+nav.groups { position: sticky; top: 100px; padding: 10px; display: flex; flex-direction: column; gap: 4px; }
+nav.groups a { display: flex; justify-content: space-between; gap: 8px; padding: 8px 10px; color: var(--dim); text-decoration: none; font: 700 11px var(--head); letter-spacing: .12em;
+  border-left: 2px solid transparent; text-transform: uppercase; }
+nav.groups a:hover { color: #fff; background: rgba(0,229,255,.06); border-left-color: var(--cyan); }
+nav.groups a .n { font: 600 11px var(--mono); color: var(--faint); letter-spacing: 0; }
+nav.groups a .n.mod { color: var(--amber); }
+
+.group { padding: 16px 20px 8px; margin-bottom: 14px; scroll-margin-top: 100px; }
+.group h2 { margin: 0; font: 900 14px var(--head); letter-spacing: .25em; color: var(--cyan); text-transform: uppercase; }
+.group .intro { margin: 6px 0 4px; color: var(--dim); font-size: 15px; }
+.group .progs { margin-bottom: 8px; font: 600 11px var(--mono); color: var(--faint); }
+.group .progs b { color: var(--violet); font-weight: 600; }
+.group .hidden-n { margin: 6px 0 10px; font: 600 12px var(--mono); color: var(--faint); cursor: pointer; }
+.group .hidden-n:hover { color: var(--magenta); }
+
+.opt { display: grid; grid-template-columns: minmax(220px, 300px) 1fr auto; gap: 14px; align-items: center; padding: 11px 0; border-top: 1px solid rgba(0,229,255,.08); }
+.opt .name { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.opt .key { font: 600 13px var(--mono); color: #fff; word-break: break-all; }
+.q { flex: none; width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--line-strong); background: transparent; color: var(--cyan); cursor: pointer;
+  font: 700 12px/18px var(--mono); padding: 0; text-align: center; }
+.q:hover, .opt.helpon .q { background: var(--cyan); color: #000; box-shadow: var(--glow-cyan); }
+.badge { font: 700 9px/1 var(--head); letter-spacing: .14em; padding: 4px 6px; border: 1px solid; }
+.badge.adv { color: var(--magenta); border-color: rgba(255,43,214,.5); }
+.badge.sec { color: var(--amber); border-color: rgba(255,176,32,.55); }
+.badge.req { color: var(--red); border-color: rgba(255,59,92,.6); }
+.badge.def { color: var(--faint); border-color: var(--faint); }
+.badge.mod { color: #000; background: var(--amber); border-color: var(--amber); }
+.help { grid-column: 1 / -1; display: none; margin: -2px 0 2px; padding: 10px 14px; border-left: 2px solid var(--cyan); background: rgba(0,229,255,.05);
+  color: #cfe3ff; font: 500 14px/1.5 var(--mono); white-space: pre-wrap; }
+.opt.helpon .help { display: block; animation: drop .25s ease-out; }
+@keyframes drop { from { opacity: 0; transform: translateY(-4px); } }
+.ctl { min-width: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ctl input[type=text], .ctl input[type=number], .ctl input[type=password], .ctl select, .ctl textarea {
+  width: 100%; max-width: 560px; background: rgba(0,0,0,.4); border: 1px solid var(--line); color: var(--text); font: 600 13.5px var(--mono); padding: 8px 10px; }
+.ctl input:focus, .ctl select:focus, .ctl textarea:focus { outline: none; border-color: var(--cyan); box-shadow: var(--glow-cyan); }
+.ctl input::placeholder, .ctl textarea::placeholder { color: var(--faint); }
+.ctl textarea { min-height: 64px; resize: vertical; }
+.opt.mod .ctl input, .opt.mod .ctl select, .opt.mod .ctl textarea { border-color: var(--amber); }
+.opt.bad .ctl input, .opt.bad .ctl select, .opt.bad .ctl textarea { border-color: var(--red); box-shadow: var(--glow-red); }
+.err { grid-column: 1 / -1; color: #ffb3c0; font: 600 12.5px var(--mono); }
+.switch { position: relative; width: 52px; height: 26px; flex: none; cursor: pointer; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch span { position: absolute; inset: 0; border: 1px solid var(--line-strong); background: rgba(0,0,0,.4); transition: .2s; }
+.switch span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; background: var(--faint); transition: .2s; }
+.switch input:checked + span { background: rgba(0,229,255,.18); border-color: var(--cyan); box-shadow: var(--glow-cyan); }
+.switch input:checked + span::after { left: 29px; background: var(--cyan); }
+.stat { font: 700 11px var(--head); letter-spacing: .14em; }
+.stat.set { color: var(--green); } .stat.unset { color: var(--faint); }
+.side { display: flex; gap: 6px; }
+.dflt { font: 500 11.5px var(--mono); color: var(--faint); }
+
+.toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: 60; padding: 14px 20px; border: 1px solid var(--green); background: rgba(3,20,14,.95);
+  color: #fff; font: 700 13px var(--head); letter-spacing: .12em; box-shadow: 0 0 30px rgba(38,255,160,.4); display: none; max-width: 90vw; }
+.toast.err { border-color: var(--red); background: rgba(25,4,10,.95); box-shadow: var(--glow-red); }
+.toast.show { display: block; animation: drop .3s; }
+.empty { padding: 50px; text-align: center; color: var(--dim); font: 600 14px var(--mono); letter-spacing: .2em; }
+
+/* cameras: one row per camera, a column per camera option ("cameras": a switch, "camera-filter": a dropdown) */
+.camtable { padding: 12px 0 10px; border-top: 1px solid rgba(0,229,255,.08); }
+.camtable .allrow { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; color: var(--dim); font-size: 15px; }
+.camtable .allrow b { color: #fff; font: 700 11px var(--head); letter-spacing: .14em; }
+.camtable table { width: 100%; border-collapse: collapse; }
+.camtable th { text-align: center; padding: 6px 10px; font: 700 10.5px var(--head); letter-spacing: .14em; color: var(--cyan); text-transform: uppercase; }
+.camtable th:first-child { text-align: left; }
+.camtable th small { display: block; font: 600 10px var(--mono); color: var(--faint); letter-spacing: 0; text-transform: none; margin-top: 2px; }
+.camtable th.mod { color: var(--amber); }
+.camtable td { padding: 6px 10px; border-top: 1px solid rgba(0,229,255,.06); text-align: center; }
+.camtable td:first-child { text-align: left; font: 600 14px var(--mono); color: #fff; }
+.camtable td .unknown { margin-left: 8px; font: 600 10.5px var(--mono); color: var(--amber); }
+.camtable tr:hover td { background: rgba(0,229,255,.04); }
+.camtable .switch { display: inline-block; vertical-align: middle; }
+.camtable select { background: rgba(0,0,0,.4); border: 1px solid var(--line); color: var(--text); font: 600 13px var(--mono); padding: 5px 8px; }
+.camtable select:focus { outline: none; border-color: var(--cyan); box-shadow: var(--glow-cyan); }
+.camtable select.set { border-color: rgba(0,229,255,.45); color: #fff; }
+.camtable tr.off td:first-child { color: var(--faint); }
+.camtable tr.off select { opacity: .45; }
+.camtable .note { margin-top: 8px; font: 500 12.5px var(--mono); color: var(--faint); }
+.camtable .warn { margin-top: 8px; font: 600 12.5px var(--mono); color: var(--amber); }
+/* camera-map: per camera, the other cameras as chips */
+.opt:has(.cmap) { align-items: start; }
+.cmap { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.cmap .r { display: grid; grid-template-columns: minmax(140px, 220px) 1fr; gap: 8px; align-items: start; }
+.cmap .r > span { font: 600 13px var(--mono); color: #fff; padding-top: 4px; }
+.cmap .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.cmap button { cursor: pointer; border: 1px solid var(--line); background: rgba(0,0,0,.35); color: var(--faint); font: 600 11.5px var(--mono); padding: 3px 7px; }
+.cmap button.on { color: #fff; border-color: var(--cyan); background: rgba(0,229,255,.16); box-shadow: inset 0 0 0 1px rgba(0,229,255,.4); }
+.cmap button:disabled { cursor: not-allowed; }
+.opt.mod .cmap button.on { border-color: var(--amber); }
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; } nav.groups { display: none; }
+  .opt { grid-template-columns: 1fr; gap: 6px; } header { position: static; }
+}
+</style>
+</head>
+<body>
+<div class="backdrop"></div>
+<div class="wrap">
+  <header class="panel cut">
+    <a class="back" href="/">◂ CONSOLE</a>
+    <h1>SYSTEM CONFIGURATION<small id="envfile">.env</small></h1>
+    <div class="seg" id="mode"><button data-m="normal" class="on">NORMAL</button><button data-m="advanced" class="adv">ADVANCED</button></div>
+    <input type="search" id="q" placeholder="Search options and help…">
+    <span class="pending" id="pending"></span>
+    <button class="btn alt" id="discard" disabled>DISCARD</button>
+    <button class="btn save" id="save" disabled>SAVE</button>
+  </header>
+  <div id="banners"></div>
+  <div class="layout"><nav class="groups panel cut" id="nav"></nav><main id="groups"><div class="empty">LOADING CONFIGURATION</div></main></div>
+</div>
+<div class="toast cut" id="toast"></div>
+
+<script>
+"use strict";
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const S = { data: null, cameras: [], inCatalog: false, advanced: false, q: "", changes: {}, errors: {}, help: new Set() };
+try { S.advanced = localStorage.getItem("sentinel.cfgmode") === "advanced"; } catch { /* storage unavailable */ }
+
+function toast(msg, err = false, ms = 5000) {
+  const t = $("#toast"); t.textContent = msg; t.className = "toast cut show" + (err ? " err" : "");
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), ms);
+}
+const shown = v => v === null || v === undefined ? "" : Array.isArray(v) || typeof v === "object" ? JSON.stringify(v) : String(v);
+
+async function load() {
+  const [r, c] = await Promise.all([fetch("/api/settings", { cache: "no-store" }), fetch("/api/cameras", { cache: "no-store" })]);
+  S.data = await r.json();
+  const cams = (await c.json()).cameras || [];
+  S.cameras = cams.map(x => x.name);
+  S.inCatalog = cams.some(x => x.in_catalog);
+  $("#envfile").textContent = S.data.env_file;
+  banners();
+  render();
+}
+function banners(extra = "") {
+  const b = [];
+  if (!S.data.writable) b.push(`<div class="banner err">Read-only: this page was opened from another device. Configuration can only be changed from the PC the console runs on.</div>`);
+  if (!S.data.exists) b.push(`<div class="banner">No <code>.env</code> yet — saving creates it.</div>`);
+  $("#banners").innerHTML = b.join("") + extra;
+}
+
+// the value an option has now: pending change, else .env, else nothing (default applies)
+function current(o) { return o.key in S.changes ? S.changes[o.key] : (o.in_env ? o.value : null); }
+function visible(o) {
+  if (!S.advanced && o.advanced) return false;
+  if (!S.q) return true;
+  const hay = (o.key + " " + o.help).toLowerCase();
+  return S.q.toLowerCase().split(/\s+/).every(w => hay.includes(w));
+}
+
+function render() {
+  if (!S.data) return;
+  const main = $("#groups"), nav = $("#nav");
+  main.innerHTML = ""; nav.innerHTML = "";
+  let any = false;
+  S.data.groups.forEach((g, gi) => {
+    const opts = g.options.filter(visible);
+    const hiddenAdv = !S.advanced ? g.options.filter(o => o.advanced && (!S.q || visible({ ...o, advanced: false }))).length : 0;
+    if (!opts.length && !hiddenAdv) return;
+    any = true;
+    const mods = g.options.filter(o => o.key in S.changes).length;
+    nav.insertAdjacentHTML("beforeend", `<a href="#g${gi}">${esc(g.name)}<span class="n${mods ? " mod" : ""}">${mods ? mods + " ✎" : opts.length}</span></a>`);
+    const sec = document.createElement("section");
+    sec.className = "group panel cut"; sec.id = "g" + gi;
+    sec.innerHTML = `<h2>${esc(g.name)}</h2>${g.intro ? `<div class="intro">${esc(g.intro)}</div>` : ""}
+      ${g.programs.length ? `<div class="progs">AFTER A CHANGE RESTART: ${g.programs.map(p => `<b>${esc(p)}</b>`).join(" · ")}</div>` : ""}`;
+    const camOpts = opts.filter(inCameraTable);
+    opts.forEach(o => {
+      if (!camOpts.includes(o)) sec.appendChild(row(o));
+      else if (o === camOpts[0]) sec.appendChild(cameraTable(camOpts));
+    });
+    if (hiddenAdv) {
+      const h = document.createElement("div");
+      h.className = "hidden-n"; h.textContent = `+ ${hiddenAdv} advanced option${hiddenAdv > 1 ? "s" : ""} — show advanced`;
+      h.onclick = () => setMode(true);
+      sec.appendChild(h);
+    }
+    main.appendChild(sec);
+  });
+  if (!any) main.innerHTML = '<div class="empty">NO OPTIONS MATCH</div>';
+  updateBar();
+}
+
+function row(o) {
+  const el = document.createElement("div");
+  el.className = "opt" + (o.key in S.changes ? " mod" : "") + (S.errors[o.key] ? " bad" : "") + (S.help.has(o.key) ? " helpon" : "");
+  el.dataset.key = o.key;
+  const badges = [
+    o.required ? '<span class="badge req">REQUIRED</span>' : "",
+    o.secret ? '<span class="badge sec">SECRET</span>' : "",
+    o.advanced ? '<span class="badge adv">ADVANCED</span>' : "",
+    o.key in S.changes ? '<span class="badge mod">MODIFIED</span>' : (!o.secret && !o.in_env ? '<span class="badge def">DEFAULT</span>' : ""),
+  ].join("");
+  el.innerHTML = `<div class="name"><span class="key">${esc(o.key)}</span><button class="q" title="What is this?">?</button>${badges}</div>
+    <div class="ctl"></div><div class="side"></div>
+    <div class="help">${esc(o.help || "No description.")}${o.default !== null && o.default !== undefined && !o.secret ? `\n\nDefault: ${esc(shown(o.default) || "(empty)")}` : ""}${o.example ? `\nExample: ${esc(o.example)}` : ""}</div>
+    ${S.errors[o.key] ? `<div class="err">✕ ${esc(S.errors[o.key])}</div>` : ""}`;
+  el.querySelector(".q").onclick = () => { S.help.has(o.key) ? S.help.delete(o.key) : S.help.add(o.key); el.classList.toggle("helpon"); };
+  const ctl = el.querySelector(".ctl"), side = el.querySelector(".side");
+  const ro = !S.data.writable;
+  const set = v => { change(o, v); };
+
+  if (o.secret) {
+    const replacing = o.key in S.changes;
+    ctl.innerHTML = replacing
+      ? `<input type="password" autocomplete="new-password" placeholder="new value (empty = clear)" value="${esc(S.changes[o.key] ?? "")}"><button class="btn sm" data-eye>SHOW</button>`
+      : `<span class="stat ${o.set ? "set" : "unset"}">${o.set ? "● SET" : "○ NOT SET"}</span>`;
+    if (replacing) {
+      const inp = ctl.querySelector("input");
+      inp.oninput = () => { S.changes[o.key] = inp.value; updateBar(); };
+      ctl.querySelector("[data-eye]").onclick = ev => { inp.type = inp.type === "password" ? "text" : "password"; ev.target.textContent = inp.type === "password" ? "SHOW" : "HIDE"; };
+      side.innerHTML = `<button class="btn sm alt" data-cancel>CANCEL</button>`;
+      side.querySelector("[data-cancel]").onclick = () => { delete S.changes[o.key]; delete S.errors[o.key]; render(); };
+      setTimeout(() => inp.focus(), 0);
+    } else if (!ro) {
+      side.innerHTML = `<button class="btn sm" data-rep>REPLACE</button>`;
+      side.querySelector("[data-rep]").onclick = () => { S.changes[o.key] = ""; render(); };
+    }
+    return el;
+  }
+
+  const cur = current(o), placeholder = o.default !== null && o.default !== undefined ? `default: ${shown(o.default)}` : (o.example ? `e.g. ${o.example}` : "");
+  const pairs = o.type === "camera-map" ? parsePairs(cur) : null;
+  if (pairs) {
+    const names = cameraNames(pairs.extra);
+    ctl.innerHTML = `<div class="cmap">${names.map(a => `<div class="r"><span>${esc(a)}</span><div class="chips">${names.filter(b => b !== a)
+      .map(b => `<button data-a="${esc(a)}" data-b="${esc(b)}" class="${pairs.has(pairKey(a, b)) ? "on" : ""}" ${ro ? "disabled" : ""}>${esc(b)}</button>`).join("")}</div></div>`).join("")
+      || '<span class="dflt">no cameras known yet</span>'}</div>`;
+    ctl.querySelectorAll("button[data-a]").forEach(bt => bt.onclick = () => {
+      const k = pairKey(bt.dataset.a, bt.dataset.b);
+      pairs.has(k) ? pairs.delete(k) : pairs.add(k);
+      setPairs(o, pairs, names);
+    });
+  } else if (o.type === "bool") {
+    const on = String(cur ?? shown(o.default)).toLowerCase() === "true" || cur === true;
+    ctl.innerHTML = `<label class="switch"><input type="checkbox" ${on ? "checked" : ""} ${ro ? "disabled" : ""}><span></span></label><span class="dflt">${on ? "ON" : "OFF"}</span>`;
+    ctl.querySelector("input").onchange = ev => set(ev.target.checked ? "true" : "false");
+  } else if (o.type === "choice") {
+    const val = cur ?? shown(o.default);
+    ctl.innerHTML = `<select ${ro ? "disabled" : ""}>${(o.choices || []).map(c => `<option value="${esc(c)}" ${c === val ? "selected" : ""}>${esc(c === "" ? "(empty — default)" : c)}</option>`).join("")}
+      ${val && !(o.choices || []).includes(val) ? `<option selected value="${esc(val)}">${esc(val)} (not a known choice)</option>` : ""}</select>`;
+    ctl.querySelector("select").onchange = ev => set(ev.target.value);
+  } else if (o.type === "dict" || o.type === "camera-map") {  // camera-map: only when its value is not a valid map
+    ctl.innerHTML = `<textarea spellcheck="false" placeholder="${esc(placeholder)}" ${ro ? "disabled" : ""}>${esc(cur ?? "")}</textarea>`;
+    ctl.querySelector("textarea").oninput = ev => set(ev.target.value);
+  } else {
+    const t = o.type === "int" || o.type === "float" ? "number" : "text";
+    ctl.innerHTML = `<input type="${t}" ${t === "number" ? `step="${o.type === "int" ? 1 : "any"}"` : ""} spellcheck="false" placeholder="${esc(placeholder)}" value="${esc(cur ?? "")}" ${ro ? "disabled" : ""}>`;
+    ctl.querySelector("input").oninput = ev => set(ev.target.value);
+  }
+  if (!ro && (o.in_env || o.key in S.changes) && !o.required) {
+    side.innerHTML = `<button class="btn sm" data-reset title="Remove from .env — the default applies">↺ DEFAULT</button>`;
+    side.querySelector("[data-reset]").onclick = () => { if (o.in_env) S.changes[o.key] = null; else delete S.changes[o.key]; delete S.errors[o.key]; render(); };
+  }
+  return el;
+}
+
+// ---------- cameras ----------
+// Every camera option picks from one list: /api/cameras (the camera catalog),
+// plus any name an option already holds. Names match ignoring case and spaces.
+const ckey = n => String(n).trim().toLowerCase();
+const ALL = new Set(["all", "*"]);
+function parseList(v) {  // a CAMERAS-style value: JSON list or comma-separated; null if unreadable
+  const t = String(v ?? "").trim();
+  if (!t) return [];
+  if (!t.startsWith("[")) return t.split(",").map(s => s.trim()).filter(Boolean);
+  try { const a = JSON.parse(t); return Array.isArray(a) ? a.map(String) : null; } catch { return null; }
+}
+const listValue = o => parseList(current(o) ?? shown(o.default)) || [];
+const isAll = list => list.length === 1 && ALL.has(ckey(list[0]));
+const fmtList = names => names.some(n => n.includes(",")) ? JSON.stringify(names) : names.join(",");
+function cameraNames(extra = []) {
+  const seen = new Map();
+  const add = n => { const k = ckey(n); if (k && !ALL.has(k) && !seen.has(k)) seen.set(k, String(n).trim()); };
+  S.cameras.forEach(add);
+  S.data.groups.flatMap(g => g.options).forEach(o => {
+    if (o.type === "cameras") listValue(o).forEach(add);
+    if (o.type === "camera-filter") Object.keys(filterMap(o) || {}).forEach(add);
+  });
+  extra.forEach(add);
+  return [...seen.values()];
+}
+function setList(o, names) {
+  const orig = parseList(o.in_env ? o.value : null) || [], same = (a, b) => a.length === b.length && a.every(n => b.some(m => ckey(m) === ckey(n)));
+  if (o.in_env && same(names, orig) && same(orig, names)) delete S.changes[o.key];   // back to what .env has
+  else change(o, fmtList(names));
+  delete S.errors[o.key];
+  render();
+}
+
+// camera-filter: {"Camera": "always", ...}; cameras not listed use the option's item_default
+function filterMap(o) {  // null if not a valid map of known choices
+  const v = current(o);
+  if (v === null || v === undefined || !String(v).trim()) return {};
+  try {
+    const m = typeof v === "object" ? v : JSON.parse(v);
+    if (!m || typeof m !== "object" || Array.isArray(m)) return null;
+    return Object.values(m).every(f => (o.choices || []).includes(f)) ? m : null;
+  } catch { return null; }
+}
+const filterOf = (m, o, n) => Object.entries(m).find(([k]) => ckey(k) === ckey(n))?.[1] ?? o.item_default;
+// A camera-filter option shows in the camera table when its value is readable, else as a text box (row)
+const inCameraTable = o => o.type === "cameras" || (o.type === "camera-filter" && filterMap(o) !== null);
+function setFilter(o, m, n, f, names) {
+  const out = {};
+  names.forEach(x => { const v = ckey(x) === ckey(n) ? f : filterOf(m, o, x); if (v !== o.item_default) out[x] = v; });
+  if (Object.keys(out).length) change(o, JSON.stringify(out));
+  else if (o.in_env) S.changes[o.key] = null;   // every camera on the default: remove from .env
+  else delete S.changes[o.key];
+  delete S.errors[o.key];
+  render();
+}
+
+function cameraTable(opts) {
+  const el = document.createElement("div");
+  el.className = "camtable";
+  const ro = !S.data.writable, names = cameraNames(), known = new Set(S.cameras.map(ckey));
+  const lists = new Map(opts.filter(o => o.type === "cameras").map(o => [o.key, listValue(o)]));
+  const maps = new Map(opts.filter(o => o.type === "camera-filter").map(o => [o.key, filterMap(o)]));
+  const allOpt = opts.find(o => o.allow_all), allOn = !!allOpt && isAll(lists.get(allOpt.key));
+  const sw = (on, attrs, off) => `<label class="switch"><input type="checkbox" ${on ? "checked" : ""} ${off ? "disabled" : ""} ${attrs}><span></span></label>`;
+  el.innerHTML = `${allOpt ? `<div class="allrow">${sw(allOn, "data-all", ro)}<b>ALL CAMERAS</b><span>${esc(allOpt.label || allOpt.key)}: every camera on the account, including ones added later (${esc(allOpt.key)}=all)</span></div>` : ""}
+    <table><thead><tr><th>Camera</th>${opts.map(o => `<th class="${o.key in S.changes ? "mod" : ""}" title="${esc(o.help)}">${esc(o.label || o.key)}<small>${esc(o.key)}</small></th>`).join("")}</tr></thead>
+    <tbody>${names.map(n => {
+      const enabled = !allOpt || allOn || lists.get(allOpt.key).some(x => ckey(x) === ckey(n));
+      return `<tr class="${enabled ? "" : "off"}"><td>${esc(n)}${S.inCatalog && !known.has(ckey(n)) ? '<span class="unknown">not on the account</span>' : ""}</td>${opts.map(o => {
+        if (o.type === "camera-filter") {
+          const f = filterOf(maps.get(o.key), o, n);
+          return `<td><select data-f="${esc(o.key)}" data-n="${esc(n)}" class="${f !== o.item_default ? "set" : ""}" ${ro ? "disabled" : ""}>${(o.choices || []).map(c =>
+            `<option value="${esc(c)}" ${c === f ? "selected" : ""}>${esc((o.choice_labels || {})[c] || c)}${c === o.item_default ? " (default)" : ""}</option>`).join("")}</select></td>`;
+        }
+        const all = o === allOpt && allOn, on = all || lists.get(o.key).some(x => ckey(x) === ckey(n));
+        return `<td>${sw(on, `data-k="${esc(o.key)}" data-n="${esc(n)}"`, ro || all)}</td>`; }).join("")}</tr>`; }).join("")}</tbody></table>
+    ${!names.length ? '<div class="warn">No cameras known yet.</div>' : ""}
+    ${allOpt && !allOn && !lists.get(allOpt.key).length ? `<div class="warn">No camera enabled: ${esc(allOpt.key)} needs at least one camera, or ALL CAMERAS.</div>` : ""}
+    ${!S.inCatalog ? '<div class="note">Cameras from the settings and recent events: the full list appears once the downloader or the live monitor has connected to the camera account.</div>' : ""}
+    ${opts.filter(o => S.errors[o.key]).map(o => `<div class="err">✕ ${esc(o.key)}: ${esc(S.errors[o.key])}</div>`).join("")}`;
+  el.querySelector("[data-all]")?.addEventListener("change", ev => setList(allOpt, ev.target.checked ? ["all"] : names));
+  const order = new Map(names.map((n, i) => [ckey(n), i]));
+  el.querySelectorAll("input[data-k]").forEach(inp => inp.onchange = () => {
+    const o = opts.find(x => x.key === inp.dataset.k), n = inp.dataset.n;
+    const list = lists.get(o.key).filter(x => ckey(x) !== ckey(n));
+    if (inp.checked) list.push(n);
+    setList(o, list.sort((a, b) => (order.get(ckey(a)) ?? 1e9) - (order.get(ckey(b)) ?? 1e9)));
+  });
+  el.querySelectorAll("select[data-f]").forEach(sel => sel.onchange = () => {
+    const o = opts.find(x => x.key === sel.dataset.f);
+    setFilter(o, maps.get(o.key), sel.dataset.n, sel.value, names);
+  });
+  return el;
+}
+
+// camera-map ({"A": ["B"], ...}, either direction) as a set of unordered pairs; null if not a valid map
+const pairKey = (a, b) => [ckey(a), ckey(b)].sort().join("\u0001");
+function parsePairs(v) {
+  let m = {};
+  if (v !== null && v !== undefined && String(v).trim()) {
+    try { m = typeof v === "object" ? v : JSON.parse(v); } catch { return null; }
+  }
+  if (!m || typeof m !== "object" || Array.isArray(m)) return null;
+  const pairs = new Set(), extra = [];
+  for (const [a, bs] of Object.entries(m)) {
+    if (!Array.isArray(bs)) return null;
+    extra.push(a);
+    bs.forEach(b => { extra.push(String(b)); pairs.add(pairKey(a, b)); });
+  }
+  pairs.extra = extra;
+  return pairs;
+}
+function setPairs(o, pairs, names) {
+  const m = {};
+  names.forEach((a, i) => names.slice(i + 1).forEach(b => { if (pairs.has(pairKey(a, b))) (m[a] = m[a] || []).push(b); }));
+  if (Object.keys(m).length) change(o, JSON.stringify(m));
+  else if (o.in_env) S.changes[o.key] = null;   // no pairs: back to the default (none)
+  else delete S.changes[o.key];
+  delete S.errors[o.key];
+  render();
+}
+
+function change(o, v) {
+  const orig = o.in_env ? o.value : null;
+  if (v === orig || (orig === null && v === "" && o.type !== "bool")) delete S.changes[o.key]; else S.changes[o.key] = v;
+  delete S.errors[o.key];
+  const el = document.querySelector(`.opt[data-key="${o.key}"]`);
+  if (el) {
+    el.classList.toggle("mod", o.key in S.changes); el.classList.remove("bad"); el.querySelector(".err")?.remove();
+    if (o.type === "bool") el.querySelector(".dflt").textContent = v === "true" ? "ON" : "OFF";
+  }
+  updateBar();
+}
+function updateBar() {
+  const n = Object.keys(S.changes).length;
+  $("#pending").textContent = n ? `${n} UNSAVED` : "";
+  $("#save").disabled = !n || !S.data?.writable;
+  $("#discard").disabled = !n;
+}
+function setMode(adv) {
+  S.advanced = adv;
+  try { localStorage.setItem("sentinel.cfgmode", adv ? "advanced" : "normal"); } catch { /* storage unavailable */ }
+  document.querySelectorAll("#mode button").forEach(b => b.classList.toggle("on", (b.dataset.m === "advanced") === adv));
+  render();
+}
+
+async function save() {
+  const changes = { ...S.changes };
+  $("#save").disabled = true;
+  let res, data;
+  try {
+    res = await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ changes }) });
+    data = await res.json().catch(() => ({ ok: false, errors: { _: (res.statusText || "save failed") } }));
+  } catch { toast("CONSOLE UNREACHABLE — NOT SAVED", true); updateBar(); return; }
+  if (!data.ok) {
+    S.errors = data.errors || {};
+    const general = Object.entries(S.errors).filter(([k]) => !S.data.groups.some(g => g.options.some(o => o.key === k)));
+    toast(`NOT SAVED · ${Object.keys(S.errors).length} PROBLEM${Object.keys(S.errors).length > 1 ? "S" : ""}`, true);
+    if (general.length) banners(`<div class="banner err">${general.map(([k, m]) => `${esc(k)}: ${esc(m)}`).join("<br>")}</div>`);
+    if (Object.keys(S.errors).some(k => S.data.groups.some(g => g.options.some(o => o.key === k && o.advanced))) && !S.advanced) setMode(true); else render();
+    return;
+  }
+  S.changes = {}; S.errors = {};
+  await load();
+  const restart = data.restart || [];
+  banners(`<div class="banner ok">Saved ${data.changed.length} option${data.changed.length > 1 ? "s" : ""} to <code>.env</code> (previous version: <code>.env.bak</code>).
+    ${restart.length ? `Restart to apply: ${restart.map(p => `<code>${esc(p)}</code>`).join(" ")} (or <code>python -m blink_watcher run</code>)` : ""}</div>`);
+  toast("CONFIGURATION SAVED");
+}
+
+document.querySelectorAll("#mode button").forEach(b => b.onclick = () => setMode(b.dataset.m === "advanced"));
+$("#q").oninput = ev => { S.q = ev.target.value.trim(); render(); };
+$("#save").onclick = save;
+$("#discard").onclick = () => { S.changes = {}; S.errors = {}; render(); };
+window.addEventListener("beforeunload", ev => { if (Object.keys(S.changes).length) { ev.preventDefault(); ev.returnValue = ""; } });
+setMode(S.advanced);
+load().catch(() => { $("#groups").innerHTML = '<div class="empty">CONSOLE UNREACHABLE</div>'; });
+</script>
+</body>
+</html>

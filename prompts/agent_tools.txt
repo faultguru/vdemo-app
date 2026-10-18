@@ -1,0 +1,27 @@
+# Tool-call protocol, appended to the chat agent's system prompt by
+# blink_watcher.chat.prompts with the role's tool list. The model answers with an
+# AgentStep JSON object: {"tool_calls": [{"name", "args_json"}], "reply"}.
+
+## How to call tools
+
+The tools mentioned in the instructions above are listed at the end, and
+all of them are available to you in this session. They are not native tool
+calls: you call them through your JSON answer, and the backend runs them.
+Never tell the user a tool is unavailable — when the instructions call for
+a tool, call it.
+
+- To call tools, list them in `tool_calls`, in order. `args_json` is the
+  arguments as a JSON object string (`{}` when there are none). The results
+  come back in the next message under "## Tool calls made this turn"; then
+  call more tools or give your final reply.
+- When you are done, leave `tool_calls` empty and put your final reply in
+  `reply`, in exactly the form the instructions above ask for (including
+  any required tag, `SKIP: <reason>` or `SILENT`).
+- When the instructions say to call a tool in the same turn as your reply,
+  and you don't need its result, give the tool calls and the final reply
+  together in one answer.
+- Leave `reply` empty while you are waiting for tool results.
+- Only rely on tool results listed under "## Tool calls made this turn";
+  never claim a tool ran otherwise.
+
+## Available tools

@@ -1,0 +1,9 @@
+# Input-mode block of the key-frame describer (blink_watcher.describe.request),
+# filled into {input_mode_block} of describe_video.user.txt.
+# Placeholders:
+#   {n_frames}      — number of still frames sent
+#   {crop}          — crop sentence (describe_keyframes.crop.txt) or empty
+#   {yolo_classes}  — YOLO class names seen across the clip, or "none"
+You are given {n_frames} still frames from this clip, in time order, each labelled with its timestamp in seconds from the start of the clip. {crop}Frames are spaced about one second apart across the whole span of motion, with denser runs (about four per second) around moments when a person bends, crouches, appears or leaves. A short action can fall between two frames, so judge what happened from the state BEFORE and AFTER across frames: compare what a person holds in an earlier frame with what they hold in a later frame, and what is on the ground or a surface before and after. A gap between frames is not by itself uncertainty — rule (e) of the OBJECT TRANSFER RULE applies only when the frames before AND after leave the hand state unclear.
+
+YOLOv8 ground-truth detections across the whole clip: {yolo_classes}. YOLO detects moving subjects (people, vehicles, animals) only — it cannot detect carried items, so packages, boxes, bags and food containers never appear in that list. Use the YOLO class names for each event's 'object' field (rule 3c), and report carried or placed items through 'people[].objects', the action enums and the descriptions.

@@ -1,221 +1,150 @@
-# Video Analysis Pipeline
+# Video analysis
 
-`blink_watcher.describe_video` turns a Blink surveillance clip into a structured
-metadata JSON plus a thumbnail and a folder of important keyframes.
-
-## What it does
-
-```
-.mp4 ──► OpenCV motion detect ──► YOLOv8 object detect ──► Gemini / Claude ──► .json
-                                                                           ├─► <stem>.jpg   (thumbnail)
-                                                                           └─► <stem>.keyframes/
-```
-
-Four sequential stages, each cached in the output JSON so a rerun only repeats
-what it has to:
-
-1. **OpenCV motion detection** (`detect_segments`)
-   - MOG2 background subtraction, downscaled to `MOTION_MAX_SIDE=960` for speed
-   - Groups consecutive moving frames into `MotionSegment`s (with gap-merging)
-   - Filters noise: min contour area, min frame area, and a `MAX_FRAME_AREA_RATIO=0.15`
-     cap to drop full-frame lighting/exposure flashes (Blink's auto-exposure kick)
-   - Picks `KEYFRAMES_PER_SEGMENT=8` evenly-spaced moving frames per segment
-   - Also computes centroid-tracked motion direction as an internal ground truth
-
-2. **YOLOv8 object detection** (`detect_objects`)
-   - Runs `yolov8n.pt` on each OpenCV-picked keyframe
-   - Filters to a movable-subject class whitelist (`person`, `car`, `dog`, …)
-     — static scenery like `tv`, `chair`, `potted plant` is dropped
-   - Validates each detection actually *moves* across keyframes (≥3% of frame
-     side) so parked cars inside the motion bbox don't become false positives
-   - If a segment has zero YOLO detections, its centroid direction is cleared
-     and the LLM call is skipped entirely for that clip
-
-3. **LLM description** (`describers.py`)
-   - Provider-abstracted: `VIDEO_DESCRIBER=claude` or `gemini`
-   - Gets motion segments + YOLO ground-truth classes as input
-   - Returns the same `VideoAnalysis` pydantic schema regardless of provider:
-     `overall_summary`, per-event `object/details/description`,
-     `important_frames_sec`, and `thumbnail_sec`
-   - Short-circuited if no YOLO detections exist — emits `"No motion."`
-
-4. **Thumbnail + keyframe extraction**
-   - Uses the LLM-picked `important_frames_sec` to seek the raw video and
-     dump JPEGs to `<stem>.keyframes/`
-   - Saves the LLM-picked `thumbnail_sec` frame as `<stem>.jpg` next to the video
-   - Falls back to a local heuristic (prefer person → biggest bbox → middle
-     keyframe) only when the LLM didn't run (no-motion / motion-only clips)
-
-## Providers
-
-Both providers implement `describers.VideoDescriber` and emit the same schema.
-
-### Gemini (default, recommended)
-- Native video input via the Gemini Files API — no keyframe sampling
-- Trims to `[first_motion_start - 0.5s, last_motion_end + 0.5s]` before upload
-  to reduce billed token count
-- Adaptive sampling: **5 FPS** when any segment has a YOLO `person` detection,
-  **1 FPS** otherwise (behavioral actions like "dropping a package" need finer
-  temporal resolution than vehicle pass-throughs)
-- Auth: `GEMINI_API_KEY` from `.env`
-- Model: `GEMINI_MODEL` (default `gemini-2.5-flash`, tested with `gemini-3-flash-preview`)
-
-### Claude (alternate)
-- Sends cropped keyframe JPEGs (cropped to the motion bbox + 15% padding)
-- System prompt + full keyframe set use prompt caching (`cache_control: ephemeral`)
-- Adaptive thinking is enabled automatically on `opus-4-6` / `sonnet-4-6`
-- Auth: OAuth token from `~/.claude/.credentials.json` (Claude Code's credentials)
-- Model: `CLAUDE_MODEL` (default `claude-haiku-4-5`)
-
-## Prompt files
-
-Human-editable, stored in `prompts/`. Lines starting with `#` are stripped at
-load time and never sent to the model.
-
-- `describe_video.system.txt` — shared system prompt. Contains the
-  **destination rule** that forbids guessing where a carried object ends up
-  unless the before/after evidence makes it literal (prevents "package was
-  placed inside the container" hallucinations when the package actually went
-  on the ground beside it).
-- `describe_video.claude.user.txt` — Claude user-turn instructions. References
-  keyframe labels (`@ t=X.XXs`) because Claude only sees image crops.
-- `describe_video.gemini.user.txt` — Gemini user-turn instructions. References
-  the full-video time range with per-segment motion spans because Gemini
-  ingests the raw clip.
-
-Key rules that both user prompts enforce:
-- No compass/directional phrases ("left to right", "enters from the top")
-- No stationary-object mentions in the summary ("the car remains parked")
-- No generic vehicle types ("pickup", "SUV") unless the body style is
-  unmistakable — fall back to "car" / "vehicle"
-- When a `person` is detected, describe the concrete action (dropping a
-  package, carrying a box, checking a phone) — not just "walks through"
-- Populate `important_frames_sec` (2–6 distinct action moments) and pick one
-  as `thumbnail_sec`
-
-## Environment variables
-
-From `.env`:
+The video processor (`python -m blink_watcher process`, `pipeline/process/`)
+turns a downloaded clip into either an event or an "ignored" record. Most
+camera clips show nothing worth a message (wind, light changes, a car passing
+on the street), so the pipeline runs the cheapest checks first and only sends
+the clips that survive them to the LLM.
 
 ```
-VIDEO_DESCRIBER=gemini            # claude | gemini
-CLAUDE_MODEL=claude-haiku-4-5
-GEMINI_MODEL=gemini-3-flash-preview
-GEMINI_API_KEY=...
+ inbox/<stamp>-<CAMERA>.metadata.json
+   |
+   |  the camera's filter (CAMERA_FILTERS: always | person | person_or_vehicle) on the provider's detections
+   |  security mode HOME + an INDOOR_CAMERAS camera: saved as it is (original video, thumbnail) and added to the day's events index; no event file, no notifier
+   v
+ 1 check     triage -----> OpenCV motion ----> YOLO: a required class moving?      (vision.check)
+   |           "nothing changes"  "no motion"     "no person moving"   -> ignored
+   v
+ 2 trim      YOLO person scan over the clip, cut to while people move           (vision.tracks, vision.focus)
+   v
+ 3 describe  sample key frames, crop to the activity, ask the LLM -> VideoAnalysis  (vision.sampling, describe)
+   |           summary.ignore, no threat, no person (no vehicle on person_or_vehicle cameras) -> ignored
+   v
+ 4 save      videos.processed/<date>/<Camera>/: <stamp>.mp4, .jpg, .metadata.json, .event.json
+             chat/events-inbox/<stamp>-<CAMERA>.event.json
+ 5 clean up  inbox file and work folder removed
 ```
 
-`VIDEO_DIR=./videos` governs where clips live on disk (for the downloader —
-not used by `describe_video.py` directly).
+Everything a clip produces is first written to its work folder in the temp
+area, `videos.temp/<date>/<Camera>/<stamp>/`, and moved out in the save step,
+so a crash never leaves half-written results in the processed area; a failed
+clip keeps its inbox file and is retried. The web console's "incoming" strip
+shows a clip's progress from the files in that folder
+([webui.md](webui.md#incoming-clips)).
 
-## How to run it
+## 1. Check (no AI)
 
-### Single clip
-```bash
-python -m blink_watcher.describe_video videos/tests/2026-04-14-16-16-59.mp4
-```
+`vision/check.py` runs three steps, each stopping the clip when it says no.
+Each leaves a processor record in the metadata (`{"name", "completed_at",
+"duration_ms", ..., "passed"}`).
 
-Outputs (next to the `.mp4`):
-- `2026-04-14-16-16-59.json`          — full metadata (see schema below)
-- `2026-04-14-16-16-59.jpg`           — LLM-picked thumbnail
-- `2026-04-14-16-16-59.keyframes/`    — LLM-picked important frames as JPEGs
+- **triage** (`vision/triage.py`) — 6 frames spread over the clip, decoded at
+  160 px, compared pairwise. If no pair differs in more than 0.5 % of its
+  pixels, nothing happens in the clip. Costs well under a second.
+- **opencv** (`vision/motion.py`) — MOG2 background subtraction on every 3rd
+  frame at 960 px, after a warm-up that absorbs the camera's exposure
+  adjustment; contours below 0.15 % of the frame (rain, leaves) and exposure
+  flashes are ignored. Moving frames are grouped into motion segments (gaps
+  under 1 s merged, blips under 0.4 s dropped), each with a bounding box, a
+  direction and 8 keyframes.
+- **yolo** (`vision/yolo.py`) — YOLOv8s on the segments' keyframes. A
+  detection counts only if it lies in the segment's motion box and its center
+  moves across the keyframes, so a parked car or a person-shaped decoration
+  does not pass. The step passes when a `YOLO_REQUIRED_CLASSES` class
+  (default `person`; `[]` = any moving class) moves. Weights are downloaded
+  to `STORAGE_ROOT/models/` on first use; `YOLO_DEVICE=directml` runs an ONNX
+  export on a DirectX 12 GPU (`hwtrace` writes crash-safe trace lines around
+  that GPU work).
 
-### Flags
-- `--output <path>` — write the JSON somewhere other than next to the video
-- `--motion-only`   — run OpenCV only, skip YOLO + LLM (fast sanity check)
+## 2. Trim
 
-### Cached reruns
-The pipeline reuses prior processor output from the output JSON so you don't
-burn time/money redoing stages that haven't changed:
+`vision/tracks.py` scans the whole clip with YOLO at 5 fps and links the boxes
+into tracks (greedy IoU); `vision/focus.py` keeps the span while a person
+track moves on screen — falling back to the motion segments' span — plus 1 s
+on each side, and `vision/ffmpeg.py` cuts it (x264, audio kept). The trim
+record (`removed_head_sec`, `offset_sec`, `duration_sec`, `focus`) maps the
+trimmed clip's timeline back onto the original. The step 1 results are
+shifted onto the trimmed clip's clock.
 
-- `opencv` — reused whenever the JSON already exists. Delete the JSON to force
-  a fresh motion pass.
-- `yolo` — reused when present in the JSON's `processors` array.
-- `llm` — always re-run (no caching) so prompt / model changes take effect.
+## 3. Describe
 
-To force a full refresh: `rm videos/tests/<clip>.json` and rerun.
+**Frame sampling** (`vision/sampling.py`, also the `frames` command): the LLM
+gets still frames, not video, so they are chosen here, on the trimmed clip:
 
-## Test clips
+- a baseline of 1 frame per second across the activity span;
+- bursts at 4 fps around the moments that matter for "what happened": a
+  tracked person's box suddenly getting squatter (bending down — dropping off
+  or picking up something), and each track's first and last sighting
+  (arriving with / leaving with);
+- at most 48 frames, each cropped to the activity region (all tracks' boxes,
+  padded so the scene stays recognisable) when that saves at least 10 % of
+  the frame, at most 960 px on the long side.
 
-`videos/tests/` has hand-picked clips for regression testing:
+The frames and `manifest.json` (times, crop, trim, the tracks) go to the work
+folder.
 
-| Clip | What it tests |
-| --- | --- |
-| package-drop clip | Package drop-off — person bends next to an outdoor container and leaves a package on the ground beside it. Tests the destination rule (must say "on the ground next to the container", not "inside the container"), person-at-5-FPS sampling, and important-frame picking across multiple motion segments. |
-| walk-across clip | Simple walk-across — single segment, person walks down the steps. Tests the basic path with one YOLO detection. |
-| no-motion clip | No real motion (minor lighting change). Tests the short-circuit: OpenCV finds a segment, YOLO finds nothing, LLM is skipped, summary is `"No motion."`. |
+**The describer** (`describe/`): `describe.request` builds the request — the
+system prompt `prompts/describe_video.system.txt`, then the user turn
+`prompts/describe_video.user.txt` filled with the clip's facts (camera, time,
+length), the security mode (`prompts/security_mode.txt`: rule 19 uses it for the
+threat level and `ignore`, never for the description), how the frames were sampled (`describe_keyframes.input_mode.txt`,
+`describe_keyframes.crop.txt`) and the motion segments with their YOLO
+detections, followed by every frame as a timestamped image. `VideoDescriber`
+sends it to the configured LLM provider (`LLM_PROVIDER`, `DESCRIBER_MODEL`,
+`DESCRIBER_EFFORT`) and parses the structured answer as `VideoAnalysis`
+(`describe/schema.py`):
 
-### What a good output looks like (package-drop clip)
+- `summary`: a one-paragraph `description`; `people` (appearance,
+  appearance details, type (kid, adult, delivery person, mail carrier, visitor, ...),
+  estimated age, actions, objects carried, labels), `vehicles`, clip-level `actions` and
+  `labels`; a `threat` assessment (`none` / `suspicious` / `threat`, signals,
+  evidence); `ignore` when nothing in the clip matters.
+- `events`: one entry per moving object per motion segment.
+- `important_frames_sec` and `thumbnail_sec`, on the trimmed clip's timeline.
 
-```json
-{
-  "overall_summary": "A delivery person wearing a dark uniform walks onto a patio carrying a package and a phone. They bend down to leave the package on the ground next to an outdoor container before checking their phone and walking away.",
-  "thumbnail_sec": 24.5,
-  "important_frames_sec": [15.8, 24.5, 27.8, 29.4],
-  "events": [
-    {"segment_index": 1, "object": "person", "description": "A person walks onto the patio carrying a package and a phone, then bends down to place the package on the ground next to an outdoor container."},
-    {"segment_index": 2, "object": "person", "description": "A person stands up, checks their phone, and walks away."}
-  ]
-}
-```
+The enums in the schema (person types, actions, objects, threat levels) are a
+contract with the notification and chat prompts; free-form `labels` carry
+everything else. The request files (`llm.request.*`, `llm.system.txt`) and
+the answer with its usage and timing (`describe.result.json`) stay in the work
+folder. `python -m blink_watcher frames <clip.mp4>` writes a frames folder
+(no LLM) and `python -m blink_watcher describe <frames folder>` describes it,
+e.g. with another `--model` or `--provider`, or `--dry-run` to only write
+the request.
 
-Checks to run when evaluating a new prompt / model:
+A clip that was processed before reuses the earlier run's trim and
+triage / OpenCV / YOLO results, so only the LLM runs again; `--redo` reruns
+everything, `--preserve` keeps the inbox file and work folder (testing).
 
-- [ ] `overall_summary` does not mention any stationary object (parked cars,
-      unchanged scenery)
-- [ ] No compass directions ("left to right", "upward", etc.)
-- [ ] No frame entry/exit language ("enters from the left", "off-screen")
-- [ ] Person actions are concrete ("placing a package", "checking a phone"),
-      not generic ("walks through")
-- [ ] The destination rule holds: "on the ground" vs "inside the container"
-      is handled correctly based on the before/after evidence
-- [ ] Vehicles use generic nouns unless the body style is unmistakable
-- [ ] `important_frames_sec` has 2–6 distinct moments; `thumbnail_sec` is one
-      of them; both are within `[0, duration_sec]`
-- [ ] No-motion clip emits `"No motion."` and skips the LLM call
+## 4. Save
 
-## Output JSON schema (top-level)
+A kept clip ends up in `videos.processed/<date>/<Camera>/`:
 
-```jsonc
-{
-  "video": "tests/2026-04-14-16-16-59.mp4",
-  "info": { "fps": 30.005, "frame_count": 902, "width": 1920, "height": 1080, "duration_sec": 30.062 },
-  "processors": [
-    { "name": "opencv", "completed_at": "...", "duration_ms": 19340 },
-    { "name": "yolo", "model": "yolov8n.pt", "duration_ms": 9885, "classes_detected": ["person"] },
-    { "name": "llm", "provider": "gemini", "model": "gemini-3-flash-preview", "duration_ms": 31500, "usage": { "input_tokens": 11435, "output_tokens": 282, "total_tokens": 11717 } }
-  ],
-  "overall_summary": "...",
-  "thumbnail_sec": 24.5,
-  "important_frames_sec": [15.8, 24.5, 27.8, 29.4],
-  "events": [
-    { "segment_index": 1, "start_sec": 14.7, "end_sec": 27.8, "bbox": [170,0,1502,1080], "object": "person", "details": "...", "description": "..." }
-  ],
-  "motion_segments": [ /* raw OpenCV output: bbox, keyframe times, direction, YOLO detections */ ]
-}
-```
+| file | contents |
+|------|----------|
+| `<stamp>.mp4` | the trimmed clip |
+| `<stamp>.jpg` | thumbnail: the frame at the LLM's `thumbnail_sec` |
+| `<stamp>.metadata.json` | the clip record from fetch + `processed`, `info`, `motion_segments`, `processors` (in run order), `llm` (the answer, model, timing, tokens, cost) |
+| `<stamp>.event.json` | the event (`pipeline.events.event_entry`), also queued as `chat/events-inbox/<stamp>-<CAMERA>.event.json` for the notifier |
 
-## Tuning knobs (in `describe_video.py`)
+An ignored clip — filtered, nothing changes, no motion, no required object
+moving, or `summary.ignore` from the LLM without a threat and without a person
+in its answer (or a vehicle, on a `person_or_vehicle` camera; prompt rule 20:
+look-alikes such as decorations are not people) — leaves only its
+`.metadata.json`, with every processing detail and an `"ignored": {"at",
+"by", "reason"}` record, in `videos.ignored/<date>/<Camera>/`.
 
-| Constant | Effect |
-| --- | --- |
-| `WARMUP_FRAMES=35` | Frames fed to MOG2 before output is trusted. Higher = more tolerant of Blink's exposure flash at clip start. |
-| `MIN_CONTOUR_AREA_RATIO=0.0015` | Smallest contour that counts as motion (0.15% of frame). Lower picks up distant subjects, raises false positives from rain/leaves. |
-| `MAX_FRAME_AREA_RATIO=0.15` | Cap that drops segments where motion covers >15% of the frame at peak — catches global lighting flashes. |
-| `MERGE_GAP_SEC=1.0` | Stitch segments separated by gaps smaller than this. |
-| `MAX_SEGMENTS_TO_DESCRIBE=12` | Cap LLM input size. |
-| `KEYFRAMES_PER_SEGMENT=8` | Number of evenly-sampled moving frames per segment the Claude path sends. Gemini ignores this (uses native video). |
-| `KEYFRAME_MAX_SIDE=1600` | Max JPEG dimension sent to Claude. |
-| `YOLO_MOVING_CLASSES` | Whitelist of COCO classes allowed to be reported as moving subjects. |
+Formats: [data_formats.md](data_formats.md).
 
-## Known weak points
+## Tuning
 
-- **OpenCV seek by frame number can be off by a frame or two** on some
-  containers (MPEG-4 with variable frame intervals). The thumbnail may land
-  on a neighboring frame of the one Gemini actually intended.
-- **Prompt caching for Claude doesn't help across different clips** — the
-  image content is the cache breakpoint, so reruns on the *same* clip are
-  cheap, but each new clip pays full price.
-- **Gemini's `temperature=0` is still not deterministic** for ambiguous
-  scenes (e.g. package-near-container). The destination rule in the system prompt
-  is the primary defense — updating it there is the right lever when output
-  drifts.
+- Settings: `CAMERA_FILTERS` (per camera; `always` for cameras without their
+  own person detection), `PROCESS_LIMIT`, `YOLO_REQUIRED_CLASSES`,
+  `YOLO_DEVICE`, `DESCRIBER_MODEL`, `DESCRIBER_EFFORT`, `LLM_RETRY_SLEEP_SEC`,
+  `LLM_MAX_RETRIES`.
+- Thresholds are constants at the top of each `vision/` module (triage
+  `TRIAGE_*`, motion `MIN_*_AREA_RATIO` / `MERGE_GAP_SEC` / ..., YOLO
+  `YOLO_CONF_THRESHOLD` / `MIN_SHIFT_RATIO`, tracks `SCAN_FPS` /
+  `PERSON_MOVE_RATIO`, sampling `BASELINE_FPS` / `BURST_FPS` / `MAX_FRAMES`,
+  trim `TRIM_PAD_SEC`), each with a comment on what it guards against.
+- `python -m blink_watcher frames <clip.mp4> -o <folder>` shows which frames a
+  clip would send (and the trim) without calling the LLM.

@@ -1,5 +1,7 @@
-# Secrets
+# Secrets (and the config page's / migration backups of .env)
 .env
+.env.*
+!.env.example
 
 # Editor / tool local state
 .claude/
@@ -9,14 +11,8 @@
 # Personal screenshots (may contain faces, addresses, real names)
 docs/pics/
 
-# Runtime state and generated output
-data/
-data.*/
-videos/
-events/
-events.*/
-logs/
-models/
+# Runtime files: everything lives under STORAGE_ROOT (storage areas, state/, logs/, models/)
+data-storage/
 
 # Python build / cache
 __pycache__/

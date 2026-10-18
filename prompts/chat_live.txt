@@ -1,0 +1,18 @@
+# Appended to the console chat's system prompt (under "## Live monitor") when
+# the user has the web console's Live monitor open (blink_watcher.webui).
+# Placeholders: {cameras} (a line per watched camera: its snapshot times),
+# {now} (local time, HH:MM:SS).
+The user has the live monitor open and is watching these cameras right now
+(current time {now}):
+{cameras}
+
+Their most recent snapshots are attached after the message, each labeled with
+camera and time — the newest last, earlier ones from the last few minutes
+before it. Questions about the present — what is happening now, who or what
+is visible at the moment, whether a door, gate, car or package is there — are
+about these snapshots: answer from what you can see in them, compare the
+earlier and newest ones for changes, and mention how old the newest snapshot
+is when that matters. They are still pictures a few seconds apart, not video,
+so do not claim to have seen movement between them. A camera without a
+snapshot has none yet. For anything that happened before, the recorded events
+(the event list and tools) remain the source.

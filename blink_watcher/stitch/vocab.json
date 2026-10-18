@@ -1,0 +1,59 @@
+{
+  "_comment": "Word lists for event stitching (blink_watcher.stitch): how appearance text is broken into comparable attributes. Keys are the words as written; values are the normalized form. Override the whole file with STITCH_VOCAB_FILE.",
+  "colours": {
+    "black": "black", "dark": "dark", "darker": "dark", "white": "white", "light": "light", "pale": "light",
+    "grey": "grey", "gray": "grey", "charcoal": "grey", "silver": "grey",
+    "red": "red", "maroon": "red", "burgundy": "red", "crimson": "red",
+    "blue": "blue", "navy": "blue", "teal": "blue", "denim": "blue",
+    "green": "green", "olive": "green", "khaki": "beige", "beige": "beige", "tan": "beige", "cream": "beige",
+    "brown": "brown", "yellow": "yellow", "gold": "yellow", "orange": "orange",
+    "pink": "pink", "purple": "purple", "violet": "purple",
+    "blond": "blond", "blonde": "blond", "auburn": "red", "ginger": "red"
+  },
+  "colour_compat": {
+    "dark": ["black", "blue", "grey", "brown", "green", "purple", "red"],
+    "light": ["white", "grey", "beige", "yellow", "pink", "blond"],
+    "black": ["grey", "blue"],
+    "grey": ["white", "blue"],
+    "beige": ["brown", "yellow", "white"]
+  },
+  "garments": {
+    "hoodie": "sweatshirt", "hooded": "sweatshirt", "sweatshirt": "sweatshirt", "sweater": "sweatshirt", "jumper": "sweatshirt", "pullover": "sweatshirt", "fleece": "sweatshirt",
+    "t-shirt": "tshirt", "tshirt": "tshirt", "tee": "tshirt", "shirt": "shirt", "top": "top", "blouse": "shirt", "polo": "shirt", "tank": "tshirt", "vest": "vest",
+    "jacket": "jacket", "coat": "jacket", "parka": "jacket", "windbreaker": "jacket", "blazer": "jacket", "raincoat": "jacket",
+    "pants": "pants", "trousers": "pants", "jeans": "pants", "leggings": "pants", "joggers": "pants", "sweatpants": "pants", "slacks": "pants",
+    "shorts": "shorts", "skirt": "skirt", "dress": "dress", "pajamas": "pajamas", "pyjamas": "pajamas", "robe": "robe", "uniform": "uniform",
+    "cap": "hat", "hat": "hat", "beanie": "hat", "hood": "hat", "helmet": "helmet",
+    "shoes": "shoes", "sneakers": "shoes", "boots": "shoes", "sandals": "shoes", "slippers": "shoes", "socks": "socks",
+    "gloves": "gloves", "mask": "mask", "scarf": "scarf", "apron": "apron"
+  },
+  "hair": {
+    "short": "short", "long": "long", "curly": "curly", "straight": "straight", "wavy": "wavy", "bald": "bald", "shaved": "bald",
+    "ponytail": "ponytail", "bun": "bun", "braid": "braid", "braids": "braid", "buzz": "short", "shoulder-length": "long"
+  },
+  "people": {
+    "man": "male", "men": "male", "male": "male", "guy": "male", "woman": "female", "women": "female", "female": "female", "lady": "female",
+    "boy": "child", "girl": "child", "child": "child", "kid": "child", "toddler": "child", "teen": "teen", "teenager": "teen",
+    "adult": "adult", "elderly": "elderly", "older": "elderly", "senior": "elderly"
+  },
+  "attributes": {
+    "glasses": "glasses", "sunglasses": "glasses", "beard": "beard", "bearded": "beard", "mustache": "beard", "moustache": "beard",
+    "tattoo": "tattoo", "tattoos": "tattoo", "slim": "slim", "heavyset": "heavyset", "tall": "tall"
+  },
+  "objects": {
+    "bag": "bag", "backpack": "backpack", "purse": "bag", "handbag": "bag", "tote": "bag",
+    "package": "package", "parcel": "package", "box": "package", "envelope": "mail", "mail": "mail",
+    "phone": "phone", "umbrella": "umbrella", "leash": "leash", "dog": "dog", "cat": "cat", "stroller": "stroller",
+    "bicycle": "bicycle", "bike": "bicycle", "scooter": "scooter", "cup": "cup", "mug": "cup", "bottle": "bottle", "laundry": "laundry", "basket": "laundry"
+  },
+  "vehicles": {
+    "car": "car", "sedan": "car", "suv": "suv", "truck": "truck", "pickup": "truck", "van": "van", "minivan": "van",
+    "motorcycle": "motorcycle", "tesla": "tesla", "hatchback": "car", "coupe": "car"
+  },
+  "stopwords": [
+    "the", "and", "with", "from", "into", "onto", "toward", "towards", "away", "past", "near", "then", "while", "their", "they", "them",
+    "this", "that", "there", "here", "its", "his", "her", "has", "have", "who", "which", "camera", "frame", "view", "clip", "video",
+    "person", "people", "someone", "appears", "visible", "seen", "briefly", "area", "side", "left", "right", "front", "back",
+    "one", "two", "small", "large", "partially", "another", "other", "out", "over", "under", "through", "across", "around", "along"
+  ]
+}

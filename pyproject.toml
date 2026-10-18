@@ -1,27 +1,30 @@
 [project]
 name = "blink-watcher"
-version = "0.1.0"
-description = "Listen to Blink cloud events and download clips for post-processing"
+version = "0.2.0"
+description = "Home-security pipeline: camera clips -> video analysis -> LLM descriptions -> notifications, with a local web console"
 requires-python = ">=3.11"
 dependencies = [
-    "blinkpy>=0.23.0",
+    "blinkpy>=0.23.0",          # the Blink camera provider
     "aiohttp>=3.9",
+    "aiofiles>=23.2",           # streamed writes in core.storage
     "pydantic>=2.6",
     "pydantic-settings>=2.2",
     "python-dotenv>=1.0",
     "tzdata>=2024.1; sys_platform == 'win32'",
-    "anthropic>=0.40",
     "opencv-python>=4.9",
     "numpy>=1.26",
-    "google-genai>=0.3",
-    "imageio-ffmpeg>=0.5",  # bundled ffmpeg for trimming clips (keeps audio)
+    "ultralytics>=8.3",         # YOLO person check
+    "imageio-ffmpeg>=0.5",      # bundled ffmpeg: trimming clips, live view
 ]
 
+[project.optional-dependencies]
+claude-api = ["anthropic>=0.40"]              # LLM_PROVIDER=claude-api
+gemini = ["google-genai>=1.0"]                # the reference Gemini describer (ai.gemini)
+directml = ["onnxruntime-directml>=1.17"]     # YOLO_DEVICE=directml
+diagnostics = ["psutil>=5.9"]                 # python -m blink_watcher hwmonitor
+
 [project.scripts]
-blink-watcher = "blink_watcher.main:cli"
-blink-describe = "blink_watcher.describe_video:main"
-blink-event = "blink_watcher.event_log:main"
-blink-chat = "blink_watcher.chat_bot:cli"
+blink-watcher = "blink_watcher.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -29,3 +32,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["blink_watcher*"]
+
+[tool.setuptools.package-data]
+"blink_watcher.webui" = ["static/*.html"]
+"blink_watcher.stitch" = ["vocab.json"]

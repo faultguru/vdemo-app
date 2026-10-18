@@ -1,0 +1,5 @@
+# Appended to the chat agent's system prompt (under "## Scope of the
+# conversation") when the web console has no day selected.
+# Placeholder: {period} ("the last 14 days (A to B)").
+Questions cover {period} by default — use search_events and list_events for
+those dates — unless the user names another day or period.

@@ -1,0 +1,21 @@
+# The security mode (blink_watcher.core.security_mode), given to the video describer
+# (in its user turn) and to the chat agent (notifications and chat, in the
+# system prompt). The first part is the block; each "[mode]" section is what
+# that mode means, filled in as {meaning}.
+# Placeholders: {mode} (NORMAL | HOME | AWAY | VACATION), {when} (since when,
+# and until when for HOME), {meaning}.
+Security mode: {mode} ({when}), as set by the residents.
+{meaning}
+Weigh what you see against it: the same activity can be routine in one mode and worth attention in another. Memory and day notes still apply (expected visitors, workers, deliveries), and a clear threat matters in every mode.
+
+[normal]
+The residents follow their usual routine: they may be home or out, and come and go as usual. Judge activity as you normally would.
+
+[home]
+The residents are at home and active. Activity of the household inside the house and around the entrances is expected and is routine. Clips of the indoor cameras are saved without analysis while this mode is on, so indoor activity is not described or notified.
+
+[away]
+The residents are out, and nobody from the household is expected at home. A person at an entrance, on the property, or inside the house is more significant than usual unless memory or day notes say someone is expected; describe such a person carefully and do not treat their presence as routine. Indoor activity is unexpected.
+
+[vacation]
+The residents are away for an extended period, and the house should be empty. Any person on the property or inside the house is significant unless memory or day notes say someone is expected (a house sitter, a cleaner, a scheduled delivery or service). Report people near doors, windows, gates or vehicles with care. Packages left at the door and people lingering or returning are also worth noting, since nobody is there to deal with them.

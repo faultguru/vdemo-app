@@ -1,0 +1,4 @@
+# Filled into {crop} of describe_keyframes.input_mode.txt when the frames are
+# cropped to a region of interest (the trailing space separates it from the
+# next sentence).
+Every frame is cropped to the same region around the activity; nothing outside it moves.

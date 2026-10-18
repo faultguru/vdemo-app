@@ -1,0 +1,5 @@
+# Input-mode block of the reference Gemini video describer
+# (blink_watcher.ai.gemini), filled into {input_mode_block} of describe_video.user.txt.
+# Placeholders:
+#   {yolo_classes}  — YOLO classes across the clip with their segment counts, or "none"
+The full video is attached — watch ONLY the listed time ranges below. YOLOv8 ground-truth detections across the whole clip: {yolo_classes}. These are the ONLY object types confirmed to be present — see rule (3c) below.
