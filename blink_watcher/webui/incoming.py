@@ -174,6 +174,8 @@ def incoming(settings: Settings, day: str, now: Optional[float] = None) -> list[
         if not md or not md.get("camera"):
             continue
         ign = md.get("ignored") or {}
+        if ign.get("by") == "filter":
+            continue  # skipped by fetch (camera filter): never was in the pipeline
         stamp = f.name.split(".")[0]
         it = _item("ignored", md, md["camera"], stamp, since_ms=int(mtime * 1000),
                    ignored={"by": ign.get("by"), "reason": ign.get("reason")})

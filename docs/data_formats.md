@@ -76,7 +76,13 @@ download them again.
 `trigger` is `motion` / `snapshot` / `live_view` or the provider's own value;
 `provider_detections` are the provider's object labels (`[]` if none). A clip
 skipped by its camera's filter (`CAMERA_FILTERS`) has no `.mp4` and gets
-`"download": {"status": "filtered", "filter", "reason", "checked_at"}`.
+`"download": {"status": "filtered", "filter", "reason", "checked_at"}`, plus a
+copy in the ignored area with `"ignored": {"by": "filter", ...}`; a clip of a
+camera not enabled (`CAMERAS`) gets only its record, with
+`"download": {"status": "skipped", "reason", "checked_at"}`. Either decision is
+final: changing a camera's filter or enabling it applies to clips recorded from
+then on, never to clips already seen (`fetch --filter` re-checks filtered clips
+on purpose).
 
 The video processor copies it into the processed (or ignored) area and adds:
 

@@ -18,9 +18,15 @@ provider detections fail their camera's filter (CAMERA_FILTERS: always |
 person | person_or_vehicle, default person; --filter overrides) are not
 downloaded at all, to save bandwidth: only their .metadata.json is written,
 marked "download": {"status": "filtered", ...}, so later runs skip them without
-re-checking — unless the camera's filter is changed, then they are checked
-against the new filter. Filtered clips are not queued for processing. Cameras
-not enabled in CAMERAS are never downloaded (not even metadata is written).
+re-checking, and get an entry in the ignored area (IGNORED_VIDEOS:
+<YYYY-MM-DD>/<Camera_Name>/<stamp>.metadata.json, "ignored": {"by": "filter"}).
+Clips of cameras not enabled in CAMERAS get only their .metadata.json, marked
+"download": {"status": "skipped", ...}. Neither is queued for processing.
+
+Settings changes apply going forward: a clip that already has a record keeps
+the decision taken when it was first seen, so enabling a camera or loosening
+its filter never pulls in clips recorded before (--filter, a manual override,
+re-checks filtered clips on purpose).
 
 Every provider session also refreshes the camera catalog (providers.catalog).
 
@@ -44,7 +50,7 @@ import argparse
 import asyncio
 import logging
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import PurePosixPath
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -52,9 +58,11 @@ from zoneinfo import ZoneInfo
 from blink_watcher.core.filters import FILTER_NAMES, passes, summary
 from blink_watcher.core.logs import setup_logging
 from blink_watcher.core.storage import (
-    PROCESSED_VIDEOS, RAW_VIDEOS, inbox_key, make_storage, metadata_key, raw_clip_key,
+    IGNORED_VIDEOS, PROCESSED_VIDEOS, RAW_VIDEOS, inbox_key, make_storage, metadata_key, raw_clip_key,
 )
-from blink_watcher.pipeline.clip_metadata import clip_metadata, filtered_by, filtered_download
+from blink_watcher.pipeline.clip_metadata import (
+    clip_metadata, decided, filtered_by, filtered_download, skipped_download,
+)
 from blink_watcher.providers import CameraProvider, ProviderClip, ProviderError, catalog, make_provider
 from blink_watcher.settings import Settings, load_settings
 
@@ -76,6 +84,7 @@ class Fetcher:
         self.tz = ZoneInfo(settings.timezone)
         self.raw = make_storage(settings, RAW_VIDEOS)
         self.processed = make_storage(settings, PROCESSED_VIDEOS)
+        self.ignored = make_storage(settings, IGNORED_VIDEOS)
 
     @property
     def label(self) -> str:
@@ -86,10 +95,10 @@ class Fetcher:
         return self.filter_override or self.settings.camera_filter(camera)
 
     async def day_clips(self, day: date) -> list[ProviderClip]:
-        """The day's clips (local time) of the enabled cameras, oldest first."""
+        """The day's clips (local time) of `cameras` - enabled or not, so that a
+        clip of a camera not enabled is recorded as skipped - oldest first."""
         start = datetime.combine(day, datetime.min.time(), tzinfo=self.tz)
-        clips = [c async for c in self.provider.list_clips(self.cameras, since=start, until=start + timedelta(days=1))
-                 if self.settings.camera_enabled(c.camera)]
+        clips = [c async for c in self.provider.list_clips(self.cameras, since=start, until=start + timedelta(days=1))]
         return sorted(clips, key=lambda c: c.recorded_at)
 
     def _key(self, clip: ProviderClip) -> str:
@@ -117,23 +126,30 @@ class Fetcher:
             return False
         return str((md.get("original") or {}).get("provider_clip_id")) == clip.provider_clip_id
 
-    def _write_metadata(self, clip: ProviderClip, key: str, filtered: bool = False) -> None:
-        """The clip's .metadata.json; `filtered`: marked as rejected by the camera's filter
-        (the video is not downloaded; video_file names the file it would have had)."""
+    def _write_metadata(self, clip: ProviderClip, key: str, download: Optional[dict] = None) -> dict:
+        """The clip's .metadata.json; `download`: why the video is not downloaded
+        (filtered / skipped; video_file names the file it would have had)."""
         md = clip_metadata(clip, self.tz, self.raw.folder, key)
-        if filtered:
-            md["download"] = filtered_download(self.filter_of(clip.camera), clip.detections, self.tz)
+        if download:
+            md["download"] = download
         self.raw.write_json(metadata_key(key), md)
+        return md
 
-    def _filtered_before(self, key: str) -> Optional[str]:
-        """The filter that rejected the clip on an earlier pass (video not stored); else None."""
+    def _decided_before(self, key: str) -> Optional[str]:
+        """filtered / skipped if an earlier pass decided not to download the clip; else None."""
         md_key = metadata_key(key)
         if self.raw.exists(key) or not self.raw.exists(md_key):
             return None
         try:
-            return filtered_by(self.raw.read_json(md_key))
+            md = self.raw.read_json(md_key)
         except ValueError:
             return None
+        if decided(md) == "filtered" and self.filter_override and filtered_by(md) != self.filter_override:
+            return None  # --filter: re-checked on purpose
+        return decided(md)
+
+    def _filtered_before(self, key: str) -> Optional[str]:
+        return "filtered" if self._decided_before(key) == "filtered" else None
 
     def _queue_for_processing(self, clip: ProviderClip, key: str) -> str:
         """Copy the clip's .metadata.json into the processed area's inbox; returns the inbox key."""
@@ -172,17 +188,26 @@ class Fetcher:
                     self._write_metadata(clip, key)
                 skipped += 1
                 continue
-            camera_filter = self.filter_of(clip.camera)
-            if self._filtered_before(key) == camera_filter:
-                filtered += 1  # filtered on an earlier pass: never re-checked under the same filter
+            if self._decided_before(key):
+                filtered += 1  # decided on an earlier pass: final, whatever the settings say now
                 continue
+            when = f"{clip.recorded_at.astimezone(self.tz):%H:%M:%S}"
+            if not self.settings.camera_enabled(clip.camera):
+                self._write_metadata(clip, key, skipped_download(self.tz))
+                filtered += 1
+                log.debug("not downloaded (camera not enabled): %s %s", clip.camera.strip(), when)
+                continue
+            camera_filter = self.filter_of(clip.camera)
             if not passes(camera_filter, clip.detections):
-                # Metadata only, marked as filtered, so later passes don't try again.
-                self._write_metadata(clip, key, filtered=True)
+                # Metadata only, marked as filtered, so later passes don't try again; and an ignored entry.
+                download = filtered_download(camera_filter, clip.detections, self.tz)
+                md = self._write_metadata(clip, key, download)
+                self.ignored.write_json(metadata_key(key), {**md, "ignored": {
+                    "at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "by": "filter",
+                    "reason": download["reason"]}})
                 filtered += 1
                 log.info("not downloaded (filter %s): %s %s [%s] - metadata marked filtered: %s",
-                         camera_filter, clip.camera.strip(), f"{clip.recorded_at.astimezone(self.tz):%H:%M:%S}",
-                         labels, self.raw.uri(metadata_key(key)))
+                         camera_filter, clip.camera.strip(), when, labels, self.raw.uri(metadata_key(key)))
                 continue
             if limit is not None and downloaded >= limit:
                 break
@@ -193,7 +218,7 @@ class Fetcher:
             log.info("downloaded %s [%s] (%d KB) -> %s", self.raw.uri(key), labels, size // 1024,
                      self.processed.uri(inbox))
         if downloaded or not quiet:
-            log.info("done: %d downloaded, %d already stored, %d not matching their camera's filter",
+            log.info("done: %d downloaded, %d already stored, %d not downloaded (filter / camera not enabled)",
                      downloaded, skipped, filtered)
         return downloaded
 
@@ -234,9 +259,7 @@ def selected_cameras(settings: Settings, requested: Optional[list[str]]) -> Opti
     rejected = [c for c in requested or [] if not settings.camera_enabled(c)]
     if rejected:
         raise ValueError(f"camera(s) not enabled in CAMERAS: {rejected} (CAMERAS: {settings.cameras})")
-    if requested:
-        return requested
-    return None if settings.all_cameras else list(settings.cameras)
+    return requested or None  # None: every camera; those not enabled get a "skipped" record
 
 
 async def run(args: argparse.Namespace) -> int:

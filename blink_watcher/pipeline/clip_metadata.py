@@ -18,8 +18,12 @@ own, provider-neutral format:
     }
   }
 
-A clip not downloaded because of its camera's filter (CAMERA_FILTERS) also gets
+A clip skipped by its camera's filter (CAMERA_FILTERS) also gets
   "download": {"status": "filtered", "filter": "person", "reason": ..., "checked_at": ...}
+and a clip of a camera not enabled (CAMERAS)
+  "download": {"status": "skipped", "reason": ..., "checked_at": ...}
+Neither has a video, and the decision is final: settings changed later apply
+only to clips recorded from then on.
 
 The same file grows as the clip moves through the pipeline: the video
 processor adds "processed": {"folder", "video_file"} (the trimmed clip) and
@@ -66,6 +70,22 @@ def filtered_download(filter_name: str, detections: list[str], tz: ZoneInfo) -> 
                   f"{detections or 'none'} do not match - video not downloaded",
         "checked_at": datetime.now(tz).isoformat(timespec="seconds"),
     }
+
+
+def skipped_download(tz: ZoneInfo) -> dict:
+    """The "download" entry of a clip of a camera not enabled in CAMERAS (video not downloaded)."""
+    return {
+        "status": "skipped",
+        "reason": "camera not enabled - video not downloaded",
+        "checked_at": datetime.now(tz).isoformat(timespec="seconds"),
+    }
+
+
+def decided(md: dict) -> Optional[str]:
+    """filtered / skipped if the record says the video was not downloaded (that
+    decision is final: later settings changes do not revisit it); else None."""
+    status = (md.get("download") or {}).get("status")
+    return status if status in ("filtered", "skipped") else None
 
 
 def filtered_by(md: dict) -> Optional[str]:
