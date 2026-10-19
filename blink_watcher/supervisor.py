@@ -15,6 +15,13 @@ it when run on its own (Windows: CTRL_BREAK to its process group, which cli
 turns into KeyboardInterrupt; POSIX: SIGINT), then waits up to STOP_TIMEOUT
 seconds before killing it.
 
+Settings changes apply on their own: the supervisor watches .env and, once it
+has been unchanged for SETTLE_SEC, restarts the services the changed options
+belong to (the "@programs" of their group in .env.example; every service for
+an option not documented there). A restarting service is stopped the Ctrl+C
+way and started again at once; clips and events wait on disk, so a clip that
+was being processed starts over.
+
 The supervisor logs starts, exits and restarts to STORAGE_ROOT/logs/run.log;
 each service keeps writing its own log file there too.
 """
@@ -32,8 +39,10 @@ import time
 from dataclasses import dataclass, field
 from typing import IO, Optional
 
+from dotenv import dotenv_values
+
 from blink_watcher.core.logs import setup_logging
-from blink_watcher.core.paths import PROJECT_ROOT
+from blink_watcher.core.paths import ENV_FILE, PROJECT_ROOT
 
 log = logging.getLogger("blink_watcher.supervisor")
 
@@ -42,6 +51,8 @@ RESTART_MIN = 2.0      # seconds before the first restart of a child that exited
 RESTART_MAX = 60.0     # longest wait between restarts
 STABLE_AFTER = 60.0    # a child that ran this long restarts after RESTART_MIN again
 STOP_TIMEOUT = 20.0    # seconds a child gets to stop on Ctrl+C before it is killed
+SETTLE_SEC = 2.0       # .env unchanged this long after a change: the affected services restart
+SUPERVISED = "BLINK_WATCHER_SUPERVISED"  # set for the children: settings changes are applied for them
 LOG_LINE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} ")
 WINDOWS = os.name == "nt"
 
@@ -54,6 +65,7 @@ class Service:
     started_at: float = 0.0
     restart_at: Optional[float] = None       # monotonic time of the next start, while it is down
     backoff: float = RESTART_MIN
+    reload_by: Optional[float] = None        # stopping to apply settings: monotonic kill deadline
     reader: Optional[threading.Thread] = field(default=None, repr=False)
 
     @property
@@ -82,7 +94,7 @@ class Supervisor:
     # ---------- children ----------
 
     def start(self, svc: Service) -> None:
-        env = {**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"}
+        env = {**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8", SUPERVISED: "1"}
         # Own process group / session: a console Ctrl+C reaches only the
         # supervisor, which then stops each child in turn.
         flags = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if WINDOWS else {"start_new_session": True}
@@ -108,6 +120,10 @@ class Supervisor:
     def _exited(self, svc: Service, now: float) -> None:
         code = svc.proc.returncode
         ran = now - svc.started_at
+        if svc.reload_by is not None:  # stopped to apply settings: back at once, no backoff
+            svc.reload_by, svc.proc, svc.restart_at = None, None, now
+            log.info(f"{svc.name} stopped (code {code}) - starting again with the new settings")
+            return
         if ran >= STABLE_AFTER:
             svc.backoff = RESTART_MIN
         delay = svc.backoff
@@ -159,17 +175,60 @@ class Supervisor:
             if svc.reader:
                 svc.reader.join(timeout=2)
 
+    # ---------- settings ----------
+
+    def _env_state(self) -> tuple[Optional[float], dict]:
+        try:
+            return ENV_FILE.stat().st_mtime, dict(dotenv_values(ENV_FILE))
+        except OSError:
+            return None, {}
+
+    def _check_settings(self, now: float) -> None:
+        """A settled .env change: restart the services its options belong to."""
+        try:
+            mtime = ENV_FILE.stat().st_mtime
+        except OSError:
+            mtime = None
+        if mtime != self.env_mtime:
+            self.env_mtime, self.env_changed_at = mtime, now
+            return
+        if self.env_changed_at is None or now - self.env_changed_at < SETTLE_SEC:
+            return
+        self.env_changed_at = None
+        _, values = self._env_state()
+        changed = sorted(k for k in set(values) | set(self.env_values) if values.get(k) != self.env_values.get(k))
+        self.env_values = values
+        if not changed:
+            return
+        names = affected(changed)
+        targets = [s for s in self.services if s.name in names]
+        log.info(f"Settings changed ({', '.join(changed)}) - restarting "
+                 f"{', '.join(s.name for s in targets) or 'nothing (no running service uses them)'}")
+        for svc in targets:
+            if svc.running:
+                svc.reload_by = now + STOP_TIMEOUT
+                self._interrupt(svc)
+            else:
+                svc.restart_at, svc.backoff = now, RESTART_MIN  # down (waiting to restart): start it now
+
     # ---------- main loop ----------
 
     def run(self) -> int:
-        log.info(f"Starting {', '.join(s.name for s in self.services)} (Ctrl+C stops)")
+        log.info(f"Starting {', '.join(s.name for s in self.services)} (Ctrl+C stops; "
+                 f"settings changes in {ENV_FILE.name} restart the services they affect)")
+        self.env_mtime, self.env_values = self._env_state()
+        self.env_changed_at: Optional[float] = None
         for svc in self.services:
             self.start(svc)
         try:
             while True:
                 time.sleep(0.5)
                 now = time.monotonic()
+                self._check_settings(now)
                 for svc in self.services:
+                    if svc.reload_by is not None and svc.running and now >= svc.reload_by:
+                        log.warning(f"{svc.name} did not stop in {STOP_TIMEOUT:g}s; killed")
+                        self._kill(svc)
                     if svc.proc is not None and svc.proc.poll() is not None:
                         if svc.reader:
                             svc.reader.join(timeout=2)  # its last lines first
@@ -180,6 +239,15 @@ class Supervisor:
             self.stop_all()
             log.info("All services stopped")
             return 0
+
+
+def affected(keys: list[str]) -> set[str]:
+    """The services that read these options: the "@programs" of their groups
+    in .env.example; every service for an option not documented there."""
+    from blink_watcher.settings.document import parse_example
+    owners = {o.key: set(g.programs) for g in parse_example() for o in g.options}
+    every = {s.name for s in default_services()}
+    return set().union(*(owners.get(k) or every for k in keys))
 
 
 def _names(values: Optional[list[str]]) -> list[str]:

@@ -480,7 +480,9 @@ async function save() {
   await load();
   const restart = data.restart || [];
   banners(`<div class="banner ok">Saved ${data.changed.length} option${data.changed.length > 1 ? "s" : ""} to <code>.env</code> (previous version: <code>.env.bak</code>).
-    ${restart.length ? `Restart to apply: ${restart.map(p => `<code>${esc(p)}</code>`).join(" ")} (or <code>python -m blink_watcher run</code>)` : ""}</div>`);
+    ${!restart.length ? "" : data.auto_restart
+      ? `Applying now: ${restart.map(p => `<code>${esc(p)}</code>`).join(" ")} restart${restart.length > 1 ? "" : "s"} in a few seconds${restart.includes("webui") ? " (this page reconnects on its own)" : ""}.`
+      : `Restart to apply: ${restart.map(p => `<code>${esc(p)}</code>`).join(" ")} (or <code>python -m blink_watcher run</code>)`}</div>`);
   toast("CONFIGURATION SAVED");
 }
 
