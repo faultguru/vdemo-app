@@ -120,6 +120,7 @@ class Notification:
     models: list[str] = field(default_factory=list)           # models that answered, in order
     same_subject_as: list[str] = field(default_factory=list)  # earlier events with the same subject
     subject: str = ""                                          # trait signature of the main subject
+    fulfills: list[str] = field(default_factory=list)         # one-off requests (alert-on:) this message fulfils
 
 
 def parse_notification(reply: str) -> Notification:
@@ -342,6 +343,7 @@ class ChatAgent:
         notification.models = turn.models
         notification.same_subject_as = list(turn.answer.get("same_subject_as") or [])
         notification.subject = (turn.answer.get("subject") or "").strip()
+        notification.fulfills = [r.strip() for r in turn.answer.get("fulfills") or [] if r.strip()]
         return notification, turn, prompt
 
     async def handle(self, chat_id: str, user_text: str, focus_date: Optional[str] = None,

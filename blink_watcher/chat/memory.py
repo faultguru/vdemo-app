@@ -9,10 +9,16 @@
 The agent adds entries and removes them by substring (remember / forget,
 note_today / clear_today). Day notes roll over implicitly: each day has its
 own file, so yesterday's entries stop being shown.
+
+One-off requests in the day notes ("alert-on: <what>") are closed by the
+notifier once an alert fulfils them (DayNotes.complete): the line becomes
+"alert-done: <what> (<how>)" and no longer triggers alerts. Requests that hold
+for the whole day ("alert-each: <what>") stay until cleared.
 """
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from threading import Lock
@@ -23,6 +29,7 @@ log = logging.getLogger(__name__)
 
 MEMORY_HEADER = "# Chat agent long-term memory\n\n"
 DAY_NOTES_SHOWN = 30  # the most recent lines of a day's notes that read() returns
+REQUEST_LINE = re.compile(r"^(\[[^\]]*\]\s*)alert-on:\s*(.+?)\s*$", re.IGNORECASE)  # a one-off request
 
 
 class Memory:
@@ -148,6 +155,38 @@ class DayNotes:
                 p.unlink()
         log.info("daily: cleared %d entry(ies) matching %r on %s", len(removed), substring, resolved)
         return f"removed {len(removed)} entry(ies) from {resolved}"
+
+
+    def complete(self, requests: list[str], note: str, date: str | None = None) -> list[str]:
+        """One-off requests fulfilled: each "alert-on:" line matching one of
+        `requests` (either text containing the other, ignoring case and
+        spacing) becomes "alert-done: <request> (<note>)". Returns the
+        completed requests."""
+        wanted = [_norm(r.split(":", 1)[1] if _norm(r).startswith("alert-on:") else r) for r in requests]
+        wanted = [w for w in wanted if w]
+        if not wanted:
+            return []
+        resolved = self._resolve(date)
+        done = []
+        with self._lock:
+            p = self.path(resolved)
+            if not p.exists():
+                return []
+            lines = p.read_text(encoding="utf-8").splitlines()
+            for i, ln in enumerate(lines):
+                m = REQUEST_LINE.match(ln)
+                if m and any(w in _norm(m.group(2)) or _norm(m.group(2)) in w for w in wanted):
+                    lines[i] = f"{m.group(1)}alert-done: {m.group(2)} ({note})"
+                    done.append(m.group(2))
+            if done:
+                p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        for r in done:
+            log.info("daily: request completed on %s: %r (%s)", resolved, r, note)
+        return done
+
+
+def _norm(text: str) -> str:
+    return " ".join(text.lower().split()).strip(" .")
 
 
 def _split(lines: list[str], substring: str, entries_only: bool = False) -> tuple[list[str], list[str]]:

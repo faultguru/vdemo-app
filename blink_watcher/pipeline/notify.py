@@ -20,6 +20,9 @@ handles up to EVENT_PROCESS_LIMIT of them (0 = all). For each event:
                 the temp area, <TEMP_VIDEOS>/<YYYY-MM-DD>/<Camera_Name>/<stamp>/event/.
      link     — the event is stitched to the day's earlier events with the
                 same subject ("track" in the event list).
+     close    — once a message is queued, the one-off requests of the day
+                notes it fulfils ("alert-on:") become "alert-done:", so the
+                same request does not alert again.
   3. queue    — the decision is stored with the event in the daily event
                 list ("notification": {decision, tone, message, skip_reason,
                 model, composed_at, message_file, sent_at}); only if a
@@ -221,6 +224,21 @@ def queue_message(areas: Areas, event: Event, notification: Optional[Notificatio
     return True
 
 
+def close_requests(agent: ChatAgent, event: Event, notification: Optional[Notification]) -> None:
+    """Step 3b: the one-off requests ("alert-on:" day notes) the sent
+    message fulfils are marked done (DayNotes.complete)."""
+    if notification is None or not notification.send or not notification.fulfills or agent.day_notes is None:
+        return
+    at = (event.body.get("recorded_at") or "")[11:16]
+    done = agent.day_notes.complete(notification.fulfills,
+                                    f"fulfilled by the {at} {event.body.get('camera') or 'camera'} alert",
+                                    date=event.date)
+    if done:
+        log.info(f"        Request(s) completed: {'; '.join(done)}")
+    else:
+        log.warning(f"        No open alert-on request matched: {'; '.join(notification.fulfills)}")
+
+
 def finish(areas: Areas, event: Event, opts: Options, t_event: float) -> None:
     """Step 4: remove the inbox file and work folder (both kept with --preserve)."""
     inbox_file = f"{INBOX}/{PurePosixPath(event.inbox_key).name}"
@@ -242,6 +260,8 @@ def process_event(agent: ChatAgent, areas: Areas, event: Event, opts: Options) -
     notification = decide(agent, areas, event)
     link_subject(areas, event, notification)
     queued = queue_message(areas, event, notification)
+    if queued:
+        close_requests(agent, event, notification)
     finish(areas, event, opts, t_event)
     return queued
 

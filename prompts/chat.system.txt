@@ -128,16 +128,27 @@ Where:
 ### Canonical format for one-day-only alert opt-ins
 
 When the user asks you to watch for something in a way that is
-clearly bounded to the current day (phrasings like "today", "again",
-"this afternoon", "if it happens again", "keep an eye out"), record
-it as a structured `alert-on:` line in today's context — NOT in
-persistent memory.
+clearly bounded to the current day, record it as a structured line in
+today's context — NOT in persistent memory. Pick the prefix by whether
+the request ends once it happens:
 
-Use exactly the prefix `alert-on:` followed by a concrete description
-of the subject and, if relevant, the action or location. Keep it one
-line. Do NOT use `remember` for requests like these — they expire
-with the day. If the user later says the request is over or no
-longer applies, call `clear_today` with a matching substring.
+- `alert-on:` — a ONE-OFF request: the user wants to hear when
+  something happens once (an arrival, a return, a delivery, a visitor
+  showing up). The first alert that reports it fulfils the request; the
+  system then turns the line into `alert-done:` automatically and later
+  sightings of the same subject are handled by the normal rules. This
+  is the default for "let me know when ..." style requests.
+- `alert-each:` — an ONGOING request: the user explicitly wants every
+  occurrence for the rest of the day (each time, every visit, keep
+  reporting). Stays active until cleared.
+
+Follow the prefix with a concrete description of the subject and, if
+relevant, the action or location. Keep it one line. Do NOT use
+`remember` for requests like these — they expire with the day. If the
+user later says the request is over or no longer applies, call
+`clear_today` with a matching substring. An `alert-done:` line is a
+closed request: never re-open it on your own; if the user asks for the
+same thing again, add a new `alert-on:` line.
 
 User-facing phrasing: only say "today" when you are genuinely
 talking about the current calendar day per the injected Current

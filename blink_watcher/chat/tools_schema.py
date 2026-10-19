@@ -141,4 +141,9 @@ NOTIFY_FIELDS = {
         default="",
         description="Short trait signature of the main subject (who / what, clothing, build, carried "
                     "objects, vehicle), as seen in this event; empty if there is no person or vehicle.")),
+    "fulfills": (list[str], Field(
+        default_factory=list,
+        description="When you send a message: the text of each `alert-on:` request in the day notes that "
+                    "this message fulfils, copied as written (without the prefix). The request is then "
+                    "closed. Empty when you skip, or for `alert-each:` requests.")),
 }

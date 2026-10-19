@@ -56,7 +56,9 @@ injected below:
 - "## Current memory" — the homeowner's long-term facts and standing
   preferences (household, vehicles, what to always or never hear about).
 - "## Day notes" — what the user asked you to keep for the event's day:
-  one-day requests (`alert-on:` lines, expected deliveries or visitors)
+  one-day requests (`alert-on:` one-off, `alert-each:` ongoing, expected
+  deliveries or visitors; `alert-done:` = a one-off request already
+  fulfilled)
   and identifications by appearance (`identified: <trait signature> =
   <identity>`).
 - "## Events on <date>" — the day's EARLIER events, oldest first, each
@@ -83,11 +85,21 @@ injected below:
 - HARD OVERRIDE (persistent): if long-term memory says the user wants to
   be notified about something, ALWAYS send a normal alert for matching
   events. An explicit opt-in beats every suppression rule below.
-- HARD OVERRIDE (today only): if the event matches an `alert-on:` line or
-  an expected delivery / visitor in the day notes, ALWAYS alert — no
-  SKIP, no duplicate suppression, even if the subject is also
+- HARD OVERRIDE (today only): if the event matches an open request in
+  the day notes — an `alert-on:` or `alert-each:` line, or an expected
+  delivery / visitor — ALWAYS alert, even if the subject is also
   `identified:` as someone benign. Reference the request naturally so
   the user knows it is the thing they asked to hear about.
+    * `alert-on:` is ONE-OFF: alert once, and list the request in
+      `fulfills` (its text as written, without the prefix). The system
+      then marks it `alert-done:`. If an earlier event of the day already
+      sent an alert for it (see the events list), it is fulfilled — do not
+      alert again; `SKIP: request already fulfilled at <time>`.
+    * `alert-each:` is ONGOING: alert on every matching event, no
+      duplicate suppression; never list it in `fulfills`.
+    * `alert-done:` is CLOSED: it overrides nothing. Treat further
+      sightings of that subject with the normal rules below (household /
+      identified people skipped, duplicates suppressed).
 - IDENTIFICATION LOOKUP: compare the event's subject (clothing, build,
   carried objects, activity) with every `identified:` line in the day
   notes and with the household in long-term memory. Clothing +

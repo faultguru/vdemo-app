@@ -139,13 +139,20 @@ notification prompt matches on:
   was ("that's the gardener"); concrete traits (build, clothing, carried
   objects), with `(household)` appended for a household member, so later
   events of the same person are named — or skipped as routine.
-- `alert-on: <subject / action / location>` — a one-day request ("tell me
-  when the pizza arrives"); a matching event is notified even when other
-  rules would skip it.
+- `alert-on: <subject / action / location>` — a one-off request for the day
+  ("tell me when the pizza arrives"); the first matching event is notified
+  even when other rules would skip it. The notifier names the requests its
+  message fulfils (`fulfills`), and once the message is queued the line
+  becomes `alert-done: <...> (fulfilled by the HH:MM <camera> alert)`, so
+  later sightings follow the normal rules instead of alerting again.
+- `alert-each: <subject / action / location>` — an ongoing request for the
+  day ("tell me every time the gate opens"); every matching event is
+  notified until the line is cleared.
 
-Both are in every system prompt (the active day's notes: the event's day for
-notify, today for chat). Memory changes only come from your messages:
-notifications read memory but never write it.
+These are in every system prompt (the active day's notes: the event's day for
+notify, today for chat). Memory changes only come from your messages; the
+notifier never writes memory, and its only change to the day notes is closing
+a fulfilled `alert-on:` request.
 
 ## The web console's chat
 
