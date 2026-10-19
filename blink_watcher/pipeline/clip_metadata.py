@@ -5,10 +5,11 @@ own, provider-neutral format:
     "version": 1,
     "camera": "Front Door",
     "date": "2026-10-17",                           # local date of recorded_at
-    "recorded_at": "2026-10-17T00:03:18-07:00",     # local time with UTC offset
+    "recorded_at": "2026-10-17T00:03:18-07:00",     # start of the recording, local time with UTC offset
     "original": {                                   # the clip as the provider delivered it
       "provider": "blink",
       "provider_clip_id": "17524422150",
+      "provider_time": "2026-10-17T00:03:48-07:00", # the provider's own clip time (Blink: end of the recording)
       "duration_sec": 30.061,
       "trigger": "motion",                          # motion | snapshot | live_view | provider's own value
       "provider_detections": ["vehicle"],           # provider's own object labels; [] if none
@@ -47,6 +48,7 @@ def clip_metadata(clip: ProviderClip, tz: ZoneInfo, area_folder: str, video_key:
         "original": {
             "provider": clip.provider,
             "provider_clip_id": clip.provider_clip_id,
+            **({"provider_time": clip.provider_time.astimezone(tz).isoformat()} if clip.provider_time else {}),
             "duration_sec": clip.duration_sec,
             "trigger": clip.trigger,
             "provider_detections": list(clip.detections),

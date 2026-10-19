@@ -54,6 +54,7 @@ Written by fetch (`pipeline/clip_metadata.py`), provider-neutral:
   "original": {
     "provider": "blink",
     "provider_clip_id": "17529094602",
+    "provider_time": "2026-10-17T11:22:34-07:00",
     "duration_sec": 30.03,
     "trigger": "motion",
     "provider_detections": ["person"],
@@ -62,6 +63,15 @@ Written by fetch (`pipeline/clip_metadata.py`), provider-neutral:
   }
 }
 ```
+
+`recorded_at` is when the recording started, and the file is named after it.
+Blink stamps a clip when the recording ends (its upload); that stamp is kept as
+`original.provider_time`, and `recorded_at` = stamp - `duration_sec`
+(`BLINK_TIME_IS_CLIP_END`), so cameras with different clip lengths (30 s,
+60 s) line up when clips are stitched. A trimmed clip starts at `recorded_at` +
+the trim's `offset_sec`. Clips stored before this change are named after
+Blink's stamp; fetch recognizes them by their `provider_clip_id` and does not
+download them again.
 
 `trigger` is `motion` / `snapshot` / `live_view` or the provider's own value;
 `provider_detections` are the provider's object labels (`[]` if none). A clip

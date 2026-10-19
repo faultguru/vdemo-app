@@ -43,7 +43,7 @@ class BlinkProvider(CameraProvider):
 
     def list_clips(self, cameras: Optional[list[str]], since: Optional[datetime] = None,
                    until: Optional[datetime] = None) -> AsyncIterator[ProviderClip]:
-        return api.list_clips(self.blink, cameras, since, until)
+        return api.list_clips(self.blink, cameras, since, until, self.settings.blink_time_is_clip_end)
 
     def download_clip(self, clip: ProviderClip) -> AsyncIterator[bytes]:
         return api.iter_clip_bytes(self.blink, clip)

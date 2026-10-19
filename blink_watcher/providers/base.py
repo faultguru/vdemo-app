@@ -65,6 +65,7 @@ class ProviderClip:
     trigger: Optional[str]             # MOTION | SNAPSHOT | LIVE_VIEW | the provider's own value
     detections: list[str]              # the provider's own object labels ("person", "vehicle"); [] if none
     raw: dict = field(default_factory=dict, compare=False, hash=False)   # the provider's clip record
+    provider_time: Optional[datetime] = None   # the provider's own clip time (UTC), when it differs from recorded_at
 
 
 @dataclass(frozen=True)

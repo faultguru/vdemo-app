@@ -93,7 +93,29 @@ class Fetcher:
         return sorted(clips, key=lambda c: c.recorded_at)
 
     def _key(self, clip: ProviderClip) -> str:
-        return raw_clip_key(self.settings, clip.camera, clip.recorded_at)
+        """The clip's file: named by recorded_at (the start of the recording) —
+        or, for a clip stored before recorded_at moved to the start, by the
+        provider's own time, so it is not downloaded again."""
+        if clip.provider_time is not None and clip.provider_time != clip.recorded_at:
+            legacy = raw_clip_key(self.settings, clip.camera, clip.provider_time)
+            if self._stored_as(legacy, clip):
+                return legacy
+        for shift in range(5):  # the name already taken by another clip (an older one, named by its end): next second
+            key = raw_clip_key(self.settings, clip.camera, clip.recorded_at + timedelta(seconds=shift))
+            if not self.raw.exists(metadata_key(key)) or self._stored_as(key, clip):
+                return key
+        return key
+
+    def _stored_as(self, key: str, clip: ProviderClip) -> bool:
+        """`key` holds this clip (its .metadata.json names the clip's provider id)."""
+        md_key = metadata_key(key)
+        if not self.raw.exists(md_key):
+            return False
+        try:
+            md = self.raw.read_json(md_key)
+        except ValueError:
+            return False
+        return str((md.get("original") or {}).get("provider_clip_id")) == clip.provider_clip_id
 
     def _write_metadata(self, clip: ProviderClip, key: str, filtered: bool = False) -> None:
         """The clip's .metadata.json; `filtered`: marked as rejected by the camera's filter

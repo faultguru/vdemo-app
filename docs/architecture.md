@@ -93,7 +93,8 @@ class CameraProvider(ABC):
 ```
 
 `Camera` (name, provider, id, model, has_own_person_detection) and
-`ProviderClip` (provider_clip_id, camera, recorded_at in UTC, duration,
+`ProviderClip` (provider_clip_id, camera, recorded_at in UTC — the start of
+the recording, with the provider's own stamp as provider_time — duration,
 trigger mapped onto `motion` / `snapshot` / `live_view`, the provider's own
 detections such as `person` / `vehicle`, raw record) are provider-neutral;
 `pipeline.clip_metadata` turns a `ProviderClip` into the clip record that
