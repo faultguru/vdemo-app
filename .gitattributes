@@ -1,0 +1,17 @@
+# Text files are stored with LF; each checkout uses the platform's line endings,
+# except for the scripts below, whose interpreter needs its own.
+* text=auto
+
+# Shell scripts: LF everywhere (sh fails on CRLF)
+*.sh  text eol=lf
+vdemo text eol=lf
+
+# Windows batch files: CRLF everywhere (cmd can miss goto labels in LF files)
+*.bat text eol=crlf
+
+# Binary
+*.ico binary
+*.png binary
+*.jpg binary
+*.mp4 binary
+*.onnx binary

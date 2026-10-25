@@ -14,7 +14,7 @@ usage: vdemo <command> [options]
 
 commands:
   start     start every service in the background (no window) and return once the
-            web console answers; already running: nothing happens
+            web console answers; if it is already running, it says "already running"
   stop      stop the services (the Ctrl+C way; killed after CONTROL_STOP_WAIT_SEC),
             also one running in a console
   restart   stop, then start

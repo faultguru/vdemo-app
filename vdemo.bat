@@ -40,7 +40,7 @@ echo usage: vdemo ^<command^> [options]
 echo.
 echo commands:
 echo   start     start every service in the background (no window) and return once the
-echo             web console answers; already running: nothing happens
+echo             web console answers; if it is already running, it says "already running"
 echo   stop      stop the services (the Ctrl+C way; killed after CONTROL_STOP_WAIT_SEC),
 echo             also one running in a console window
 echo   restart   stop, then start
