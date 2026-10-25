@@ -11,16 +11,19 @@ from typing import TYPE_CHECKING, Optional
 
 from blink_watcher.live.snapshots import SOI
 from blink_watcher.providers import LiveSource, ProviderError
+from blink_watcher.settings import get_settings
+
+_settings = get_settings()
 
 if TYPE_CHECKING:
     from blink_watcher.live.monitor import LiveMonitor
 
 log = logging.getLogger(__name__)
 
-LIVE_FPS = 8                # frames per second of the MJPEG stream
-LIVE_SNAPSHOT_SEC = 5.0     # a live frame saved as the camera's snapshot this often
-LIVE_IDLE_SEC = 8.0         # stream stops this long after its last viewer left
-LIVE_STALL_SEC = 25.0       # no frame for this long: the stream is over
+LIVE_FPS = _settings.live_stream_fps                    # frames per second of the MJPEG stream
+LIVE_SNAPSHOT_SEC = _settings.live_stream_snapshot_sec  # a live frame saved as the camera's snapshot this often
+LIVE_IDLE_SEC = _settings.live_stream_idle_sec          # stream stops this long after its last viewer left
+LIVE_STALL_SEC = _settings.live_stream_stall_sec        # no frame for this long: the stream is over
 EOI = b"\xff\xd9"           # JPEG end-of-image marker
 
 

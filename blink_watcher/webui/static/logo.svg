@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="256" height="256">
+  <title>faultguru</title>
+  <defs>
+    <clipPath id="fg-l"><polygon points="0,0 34,0 26,64 0,64"/></clipPath>
+    <clipPath id="fg-r"><polygon points="37.5,0 64,0 64,64 29.5,64"/></clipPath>
+  </defs>
+  <g transform="translate(0,0)">
+    <g clip-path="url(#fg-l)" fill="#ffffff"><rect x="14" y="8" width="10" height="48"/><rect x="14" y="8" width="38" height="10"/><rect x="14" y="29" width="28" height="9"/></g>
+    <g clip-path="url(#fg-r)" fill="#00e5ff"><rect x="14" y="13" width="38" height="10"/><rect x="14" y="34" width="28" height="9"/></g>
+  </g>
+</svg>

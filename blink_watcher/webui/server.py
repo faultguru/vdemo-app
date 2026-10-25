@@ -5,7 +5,8 @@ with a live monitor, a chat with the analyst and the configuration page.
     python -m blink_watcher webui --host 0.0.0.0 --port 9000
 
 Serves two single-page apps from webui/static — / (index.html: events,
-activities, incoming clips, live monitor, chat) and /settings (settings.html) —
+activities, incoming clips, live monitor, chat) and /settings (settings.html),
+the faultguru logo (/logo.svg, /favicon.ico; made by brand/make_brand.py) —
 and their JSON API, one module per area in webui.routes (each lists its routes):
 events, incoming, settings, live, chat.
 
@@ -24,14 +25,17 @@ from aiohttp import web
 
 from blink_watcher.core.logs import setup_logging
 from blink_watcher.settings import Settings, load_settings
+from blink_watcher.settings import get_settings
 from blink_watcher.webui.context import CONTEXT, WebContext
-from blink_watcher.webui.routes import chat, events, incoming, live, security, settings as settings_routes
+from blink_watcher.webui.routes import chat, events, health, incoming, live, security, settings as settings_routes
+
+_settings = get_settings()
 
 log = logging.getLogger("blink_watcher.webui.server")
 
 PROGRAM = "webui"
 STATIC = files("blink_watcher.webui") / "static"
-MAX_UPLOAD_MB = 200   # files sent with a chat message
+MAX_UPLOAD_MB = _settings.webui_max_upload_mb  # files sent with a chat message
 
 
 def _page(name: str):
@@ -45,8 +49,9 @@ def make_app(settings: Settings) -> web.Application:
     ctx = app[CONTEXT] = WebContext(settings)
     live.setup(app, settings)
     app[chat.CONSOLE] = chat.Console(ctx)
-    app.add_routes([web.get("/", _page("index.html")), web.get("/settings", _page("settings.html"))])
-    for module in (events, incoming, settings_routes, live, chat, security):
+    app.add_routes([web.get("/", _page("index.html")), web.get("/settings", _page("settings.html")),
+                    web.get("/logo.svg", _page("logo.svg")), web.get("/favicon.ico", _page("favicon.ico"))])
+    for module in (events, incoming, settings_routes, live, chat, security, health):
         app.add_routes(module.routes)
     return app
 

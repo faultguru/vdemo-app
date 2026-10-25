@@ -22,11 +22,16 @@ __all__ = ["ImagePart", "LLMClient", "LLMRequest", "LLMResponse", "LLMThrottled"
 
 
 def make_llm(settings: "Settings") -> LLMClient:
+    """The provider, reporting each request to the ai dependency (core.health)."""
+    from blink_watcher.core.health import Dependency
     retry = RetryPolicy(settings.llm_retry_sleep_sec, settings.llm_max_retries)
     if settings.llm_provider == "claude-cli":
         from blink_watcher.ai.claude_cli import ClaudeCliClient
-        return ClaudeCliClient(retry)
-    if settings.llm_provider == "claude-api":
+        client: LLMClient = ClaudeCliClient(retry)
+    elif settings.llm_provider == "claude-api":
         from blink_watcher.ai.claude_api import ClaudeApiClient
-        return ClaudeApiClient(retry)
-    raise ValueError(f"unknown LLM_PROVIDER {settings.llm_provider!r}")
+        client = ClaudeApiClient(retry)
+    else:
+        raise ValueError(f"unknown LLM_PROVIDER {settings.llm_provider!r}")
+    client.health = Dependency(settings, "ai", label=f"AI ({settings.llm_provider})")
+    return client

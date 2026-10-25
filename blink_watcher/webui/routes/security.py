@@ -1,7 +1,7 @@
 """The security mode (core.security_mode) in the console's header.
 
-  GET  /api/security-mode    {"state": {mode, label, since, until, by}, "headline", "modes": [{value, label}],
-                           "home_until": HOME_MODE_UNTIL}
+  GET  /api/security-mode    {"state": {mode, label, since, until, by, note}, "headline", "modes": [{value, label}],
+                           "home_until": HOME_MODE_UNTIL, "schedule": [{id, mode, start, end, note, text}]}
   POST /api/security-mode    {"mode": normal | home | away | vacation} -> the new state (as GET)
 """
 from __future__ import annotations
@@ -22,7 +22,9 @@ routes = web.RouteTableDef()
 def _body(settings, state: security_mode.ModeState) -> dict:
     return {"state": state.to_dict(), "headline": state.headline(),
             "modes": [{"value": m, "label": security_mode.LABELS[m]} for m in security_mode.MODES],
-            "home_until": settings.home_mode_until}
+            "home_until": settings.home_mode_until,
+            "schedule": [{"id": e.id, "mode": e.mode, "start": e.start, "end": e.end, "note": e.note,
+                          "text": e.describe()} for e in security_mode.upcoming(settings)]}
 
 
 @routes.get("/api/security-mode")

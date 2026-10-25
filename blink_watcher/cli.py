@@ -30,6 +30,7 @@ class Command:
 COMMANDS: dict[str, Command] = {
     "run": Command("blink_watcher.supervisor",
                    "every service in one console: fetch, process, notify, chat-bot, webui"),
+    "control": Command("blink_watcher.control", "start / stop / restart / status of `run` in the background"),
     "fetch": Command("blink_watcher.pipeline.fetch", "download new clips from the camera provider"),
     "process": Command("blink_watcher.pipeline.process",
                        "analyze queued clips (motion, YOLO, trim) and describe them with the LLM"),

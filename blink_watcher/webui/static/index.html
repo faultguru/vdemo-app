@@ -3,7 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sentinel Console</title>
+<title>Faultguru Watchtower</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/logo.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
@@ -101,6 +103,7 @@ header::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px
 .chip .w { font: 600 11px/1.6 var(--mono); color: var(--dim); letter-spacing: .15em; text-transform: uppercase; }
 .chip .n { font: 600 12px/1 var(--mono); color: var(--cyan); }
 .chip .t { color: var(--red); margin-left: 6px; }
+.chip .q { color: var(--amber); margin-left: 6px; }  /* clips still being processed */
 .pick { flex: none; display: flex; align-items: center; }
 .pick input { background: rgba(0,0,0,.35); border: 1px solid var(--line); color: var(--text); font: 600 14px var(--mono); padding: 10px; color-scheme: dark; }
 
@@ -263,6 +266,9 @@ body.monitoring .monitor { display: grid; gap: 10px; justify-content: center; al
 .cfglink:hover { color: #fff; border-color: var(--cyan); box-shadow: var(--glow-cyan); }
 
 /* ---------- security mode (header): normal / home / away / vacation ---------- */
+.healthbar { margin: 0 0 12px; padding: 10px 14px; border: 1px solid var(--red); background: rgba(255,59,92,.12); color: var(--text); font: 13px var(--mono); box-shadow: var(--glow-red); overflow-wrap: anywhere; }
+.healthbar b { color: var(--red); font: 700 11px var(--head); letter-spacing: .14em; margin-right: 8px; }
+.healthbar div + div { margin-top: 4px; }
 .secmode { --hc: var(--cyan); display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 10px; border: 1px solid var(--hc); color: var(--hc); }
 .secmode b { font: 700 10.5px var(--head); letter-spacing: .2em; }
 .secmode select { background: rgba(0,0,0,.5); color: #fff; border: 1px solid var(--line); font: 700 11px var(--head); letter-spacing: .14em; padding: 5px 6px; cursor: pointer; }
@@ -585,7 +591,7 @@ details summary { cursor: pointer; font: 700 12px var(--head); letter-spacing: .
         <g class="ring"><circle cx="24" cy="24" r="11" stroke="#ff2bd6" stroke-width="1.5" stroke-dasharray="5 4"/></g>
         <circle cx="24" cy="24" r="4.5" fill="#00e5ff"/>
       </svg>
-      <div class="brand">SENTINEL<small>BLINK WATCHER · SECURITY OPERATIONS</small></div>
+      <div class="brand">WATCHTOWER<small>FAULTGURU · SECURITY OPERATIONS</small></div>
     </div>
     <div class="hud-right">
       <div class="secmode" id="secmode" title="Security mode: the video describer and the notifier weigh activity by it. HOME: indoor cameras' clips are saved without analysis or notification, until the time shown."><b>SECURITY MODE</b><select id="secSel"></select><small id="secInfo"></small></div>
@@ -595,6 +601,8 @@ details summary { cursor: pointer; font: 700 12px var(--head); letter-spacing: .
       <div class="clock" id="clock">--:--:--<small id="clockdate">----</small></div>
     </div>
   </header>
+
+  <div class="healthbar" id="health" hidden></div>
 
   <nav class="days panel cut">
     <button class="live-btn cut" id="tLive" title="The selected cameras on screen: live stream or snapshots">LIVE VIEW</button>
@@ -750,7 +758,7 @@ async function open(mode, date) {
   chat.detached = false; syncFocus();  // the analyst follows the selected day until detached (✕)
   $("#feed").innerHTML = '<div class="loading">ACQUIRING EVENT STREAM</div>';
   await loadEvents(true);
-  if (mode === "live") startPoll();
+  startPoll();  // an archive day can still be filling in (a catch-up after an outage)
 }
 
 // ---------- days ----------
@@ -761,11 +769,12 @@ async function loadDays() {
     if (!days.some(x => x.date === d.today)) days.unshift({ date: d.today, events: 0, sent: 0, threats: 0 });
     days.reverse();  // oldest left, today right-most
     const chips = $("#chips"), first = !chips.children.length;
+    days.forEach(x => x.title = x.pending ? `${x.pending} clip(s) still being processed` : "");
     chips.innerHTML = days.map(x => `
-      <button class="chip cut" data-date="${x.date}">
+      <button class="chip cut" data-date="${x.date}" title="${x.title}">
         <div class="w">${x.date === d.today ? "TODAY" : weekday(x.date)}</div>
         <div class="d">${x.date.slice(5)}</div>
-        <div class="n">${x.events} EVT${x.threats ? `<span class="t">▲${x.threats}</span>` : ""}</div>
+        <div class="n">${x.events} EVT${x.threats ? `<span class="t">▲${x.threats}</span>` : ""}${x.pending ? `<span class="q">+${x.pending}</span>` : ""}</div>
       </button>`).join("");
     chips.querySelectorAll(".chip").forEach(c => c.onclick = () => go(c.dataset.date));
     if (first) chips.scrollLeft = chips.scrollWidth;  // start at today
@@ -800,14 +809,14 @@ async function loadEvents(first) {
   state.groups = data.groups || null;
   layout(first);
   renderStats(); fillCameras();
-  if (!state.order.length) feed.innerHTML = `<div class="empty">${state.mode === "live" ? "STANDING BY — NO EVENTS YET TODAY" : "NO EVENTS RECORDED ON THIS DAY"}</div>`;
+  if (!state.order.length) feed.innerHTML = `<div class="empty">${state.mode === "live" ? "STANDING BY — NO EVENTS YET TODAY" : "NO EVENTS RECORDED ON THIS DAY YET"}</div>`;
   else feed.querySelector(".empty")?.remove();
   if (state.mode === "live") {
     if (first) requestAnimationFrame(() => scrollTop(false));
     else if (added) onNew(added);
   }
   if (added && !first) loadDays();
-  if (state.mode === "live") loadIncoming(first);
+  loadIncoming(first);
 }
 // The feed is a list of units, newest activity first: an activity card for
 // 2+ stitched clips (server-side stitch.Stitcher), else the clip's own row.
@@ -943,7 +952,7 @@ const INC_STEPS = { queued: "QUEUE", analyze: "ANALYZE", trim: "TRIM", frames: "
 async function loadIncoming(first) {
   let data;
   try { data = await api(`/api/incoming/${state.date}`); } catch { return; }
-  if (state.mode !== "live" || data.date !== state.date) return;
+  if (data.date !== state.date) return;
   const list = $("#incList"), seen = new Set();
   for (const it of data.items) {
     if (state.events.has(it.id) || state.incGone.has(it.id)) continue;
@@ -2097,21 +2106,41 @@ $("#tStitch").onclick = () => {
 };
 
 // ---------- security mode ----------
+let secShown = "";  // the last response shown: polling re-renders only on a change
 function showSecurityMode(d) {
-  const sel = $("#secSel"), st = d.state;
+  const sel = $("#secSel"), st = d.state, key = JSON.stringify(d);
+  if (key === secShown || (sel.options.length && document.activeElement === sel)) return;  // unchanged, or being picked
+  secShown = key;
   if (!sel.options.length) sel.innerHTML = d.modes.map(m => `<option value="${esc(m.value)}">${esc(m.label.toUpperCase())}</option>`).join("");
   sel.value = st.mode;
   $("#secmode").className = "secmode " + st.mode;
   const hm = iso => (iso || "").slice(11, 16);
-  $("#secInfo").textContent = st.until ? `until ${hm(st.until)}` : st.mode !== "normal" && st.since ? `since ${hm(st.since)}` : "";
+  const day = iso => (iso || "").slice(0, 10) === new Date().toLocaleDateString("sv") ? hm(iso) : `${(iso || "").slice(5, 10)} ${hm(iso)}`;
+  const next = (d.schedule || [])[0];
+  $("#secInfo").textContent = (st.until ? `until ${day(st.until)}` : st.mode !== "normal" && st.since ? `since ${hm(st.since)}` : "")
+    + (next ? ` · next ${next.mode.toUpperCase()} ${day(next.start)}` : "");
+  $("#secmode").title = SEC_TITLE + (st.note ? `\nNow: ${st.note}` : "")
+    + ((d.schedule || []).length ? "\nScheduled:\n" + d.schedule.map(e => e.text).join("\n") : "");
 }
+const SEC_TITLE = $("#secmode").title;
 async function loadSecurityMode() {
   try { showSecurityMode(await api("/api/security-mode")); } catch { /* backend unreachable: keep what is shown */ }
 }
 $("#secSel").onchange = async ev => {
+  ev.target.blur();  // so the reply below is shown
   const r = await fetch("/api/security-mode", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: ev.target.value }) });
   if (r.ok) showSecurityMode(await r.json()); else loadSecurityMode();
 };
+
+// ---------- service health ----------
+async function loadHealth() {
+  let d;  // 503 when a module is DOWN: still the same body
+  try { d = await (await fetch("/api/health", { cache: "no-store" })).json(); }
+  catch { return; /* backend unreachable: shown by the link dot */ }
+  const down = (d.modules || []).filter(m => m.status === "DOWN"), bar = $("#health");
+  bar.hidden = !down.length;
+  bar.innerHTML = down.map(m => `<div><b>${esc(m.label.toUpperCase())}</b>${esc(m.description)}</div>`).join("");
+}
 
 // ---------- boot ----------
 (async function boot() {
@@ -2130,9 +2159,12 @@ $("#secSel").onchange = async ev => {
   } catch { /* storage unavailable */ }
   $("#tMode").textContent = mon.mode === "live" ? "LIVE STREAM" : "SNAPSHOTS";
   $("#tMode").classList.toggle("on", mon.mode === "live");
-  await Promise.all([loadDays(), loadChat(), loadSecurityMode()]);
+  await Promise.all([loadDays(), loadChat(), loadSecurityMode(), loadHealth()]);
   state.daysTimer = setInterval(loadDays, 30000);
-  setInterval(loadSecurityMode, 30000);  // HOME ends on its own; Telegram can change the mode too
+  // the mode also changes without this page: Telegram, the chat, auto-away, schedules, HOME's nightly end
+  setInterval(loadSecurityMode, (state.cfg.poll_sec || 3) * 1000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) loadSecurityMode(); });
+  setInterval(loadHealth, 30000);
   route();
 })();
 </script>

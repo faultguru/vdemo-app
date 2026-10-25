@@ -8,7 +8,9 @@
 
 The agent adds entries and removes them by substring (remember / forget,
 note_today / clear_today). Day notes roll over implicitly: each day has its
-own file, so yesterday's entries stop being shown.
+own file, so yesterday's entries stop being shown. Notes for a day still to
+come (note_for_date: an expected delivery tomorrow) go into that day's file
+and apply when it arrives; until then the chat agent sees them as upcoming.
 
 One-off requests in the day notes ("alert-on: <what>") are closed by the
 notifier once an alert fulfils them (DayNotes.complete): the line becomes
@@ -19,16 +21,20 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Lock
 
 from blink_watcher.chat.store import DAY_NOTES, MEMORY_FILE, local_now
+from blink_watcher.settings import get_settings
+
+_settings = get_settings()
 
 log = logging.getLogger(__name__)
 
 MEMORY_HEADER = "# Chat agent long-term memory\n\n"
-DAY_NOTES_SHOWN = 30  # the most recent lines of a day's notes that read() returns
+DAY_NOTES_SHOWN = _settings.day_notes_shown        # the most recent lines of a day's notes that read() returns
+UPCOMING_DAYS = _settings.day_notes_upcoming_days  # how far ahead upcoming() looks
 REQUEST_LINE = re.compile(r"^(\[[^\]]*\]\s*)alert-on:\s*(.+?)\s*$", re.IGNORECASE)  # a one-off request
 
 
@@ -108,6 +114,17 @@ class DayNotes:
         p = self.path(self._resolve(date))
         text = p.read_text(encoding="utf-8").rstrip() if p.exists() else ""
         return "\n".join(text.splitlines()[-DAY_NOTES_SHOWN:]) if text else ""
+
+    def upcoming(self, after: str, days: int = UPCOMING_DAYS) -> list[tuple[str, str]]:
+        """(date, notes) of the days after `after` (YYYY-MM-DD), up to `days` ahead, that have notes."""
+        start = datetime.strptime(after, "%Y-%m-%d")
+        out = []
+        for i in range(1, days + 1):
+            date = f"{start + timedelta(days=i):%Y-%m-%d}"
+            text = self.read(date)
+            if text:
+                out.append((date, text))
+        return out
 
     def note(self, text: str, date: str | None = None, time: str | None = None) -> str:
         """Append "[HH:MM] text": `time` if given (the event's time), the

@@ -78,6 +78,41 @@ TOOLS: list[dict] = [
           "day matches the most recently looked-at event; you do NOT pick a date.",
           {"substring": {"type": "string", "description": "Text to match against context entries."}},
           ("substring",)),
+    _tool("note_for_date",
+          "Append a line to the day notes of a day still to come (today or later), for something "
+          "the user expects on that day: a delivery, a visitor, a worker, an alert request for that "
+          "day. The line applies on that day like any day note (alert-on: / alert-each: included). "
+          "Resolve the user's day (tomorrow, a weekday, a date) against the current date.",
+          {"date": _DATE,
+           "text": {"type": "string", "description": "One concise line, in the day-note formats."},
+           "time": {"type": "string", "description": "Optional HH:MM (24-hour) the note is about."}},
+          ("date", "text")),
+    _tool("clear_for_date",
+          "Remove lines containing the given substring from the day notes of a coming day "
+          "(e.g. an expected delivery that was cancelled).",
+          {"date": _DATE,
+           "substring": {"type": "string", "description": "Text to match against that day's entries."}},
+          ("date", "substring")),
+    _tool("set_security_mode",
+          "Set the security mode now, when the user says they are leaving, back, at home or going "
+          "away. Give `until` when they say when it ends (when they will be back): the mode then turns "
+          "back to normal on its own at that time.",
+          {"mode": {"type": "string", "enum": ["normal", "home", "away", "vacation"]},
+           "until": {"type": "string", "description": "Optional local time YYYY-MM-DDTHH:MM it ends."},
+           "note": {"type": "string", "description": "Optional short reason (e.g. at work)."}},
+          ("mode",)),
+    _tool("schedule_security_mode",
+          "Schedule a security mode for a later period (e.g. a trip): it is set on its own at `start` "
+          "and turns back to normal at `end`. Scheduled changes are listed under the security mode in "
+          "the system prompt; periods must not overlap.",
+          {"mode": {"type": "string", "enum": ["normal", "home", "away", "vacation"]},
+           "start": {"type": "string", "description": "Local time YYYY-MM-DDTHH:MM it starts."},
+           "end": {"type": "string", "description": "Local time YYYY-MM-DDTHH:MM it ends; omit for until changed."},
+           "note": {"type": "string", "description": "Optional short reason (e.g. family trip)."}},
+          ("mode", "start")),
+    _tool("cancel_security_schedule",
+          "Cancel a scheduled security mode by the id shown in the system prompt's scheduled changes.",
+          {"id": {"type": "string"}}, ("id",)),
     # The active day's notes are already in the system prompt: this is only for other days.
     _tool("get_day_notes",
           "Read the daily-context file for a specific date OTHER than the active day. The active "
@@ -88,7 +123,11 @@ TOOLS: list[dict] = [
 
 # Tools that change long-term memory or the day notes: only the memory model
 # runs them. Only chat (the user's instructions) has them; notify() has no tools.
-MEMORY_TOOLS = {"remember", "forget", "note_today", "clear_today"}
+MEMORY_TOOLS = {"remember", "forget", "note_today", "clear_today", "note_for_date", "clear_for_date"}
+# Tools that change the security mode: also run by the memory model (they act on
+# the user's plans); the web console's agent has them too.
+MODE_TOOLS = {"set_security_mode", "schedule_security_mode", "cancel_security_schedule"}
+STATE_TOOLS = MEMORY_TOOLS | MODE_TOOLS
 # The web console's agent can't change memory and has no day notes.
 CONSOLE_TOOLS = [t for t in TOOLS if t["name"] not in MEMORY_TOOLS | {"get_day_notes"}]
 
@@ -141,6 +180,12 @@ NOTIFY_FIELDS = {
         default="",
         description="Short trait signature of the main subject (who / what, clothing, build, carried "
                     "objects, vehicle), as seen in this event; empty if there is no person or vehicle.")),
+    "household_vehicle": (Literal["departed", "arrived", "none"], Field(
+        default="none",
+        description="Only when the input says auto-away is on: 'departed' if this event shows a household "
+                    "vehicle (as long-term memory describes it) leaving the property, 'arrived' if it shows "
+                    "one coming home (see the system prompt for the evidence that counts); 'none' otherwise, "
+                    "and whenever unsure. Fill it whether or not you send a message.")),
     "fulfills": (list[str], Field(
         default_factory=list,
         description="When you send a message: the text of each `alert-on:` request in the day notes that "

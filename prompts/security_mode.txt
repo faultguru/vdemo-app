@@ -3,7 +3,7 @@
 # system prompt). The first part is the block; each "[mode]" section is what
 # that mode means, filled in as {meaning}.
 # Placeholders: {mode} (NORMAL | HOME | AWAY | VACATION), {when} (since when,
-# and until when for HOME), {meaning}.
+# until when if it ends on its own, and the residents' note), {meaning}.
 Security mode: {mode} ({when}), as set by the residents.
 {meaning}
 Weigh what you see against it: the same activity can be routine in one mode and worth attention in another. Memory and day notes still apply (expected visitors, workers, deliveries), and a clear threat matters in every mode.

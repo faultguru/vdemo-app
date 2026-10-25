@@ -1,7 +1,10 @@
 """Picture helpers shared by the chat agent, the live monitor and the web UI."""
 from __future__ import annotations
+from blink_watcher.settings import get_settings
 
-IMAGE_MAX_SIDE = 1024  # pictures shown to an LLM are downscaled to this (tokens)
+_settings = get_settings()
+
+IMAGE_MAX_SIDE = _settings.llm_image_max_side  # pictures shown to an LLM are downscaled to this (tokens)
 
 
 class ImageError(ValueError):

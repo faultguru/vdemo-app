@@ -226,10 +226,10 @@ class ClipProcessor:
         if focus.source == "person":
             log.info(f"{STEP}scan    {scan_sec}  Moving person found at {focus.span[0]:.1f}-{focus.span[1]:.1f}s")
         elif focus.span:
-            log.warning(f"{STEP}scan    {scan_sec}  Moving person not found (moved <{PERSON_MOVE_RATIO:.0%} of "
-                        f"frame) - motion span used: {focus.span[0]:.1f}-{focus.span[1]:.1f}s")
+            log.info(f"{STEP}scan    {scan_sec}  Moving person not found (moved <{PERSON_MOVE_RATIO:.0%} of "
+                     f"frame) - motion span used: {focus.span[0]:.1f}-{focus.span[1]:.1f}s")
         else:
-            log.warning(f"{STEP}scan    {scan_sec}  No activity found")
+            log.info(f"{STEP}scan    {scan_sec}  No activity found")
 
         t1 = time.perf_counter()
         if focus.span:

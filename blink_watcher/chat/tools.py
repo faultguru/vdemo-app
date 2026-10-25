@@ -58,7 +58,7 @@ class EventTools:
 
     def _load_date(self, date: str) -> list[dict]:
         if date not in self.list_event_dates():
-            raise EventToolError(f"no events file for {date}")
+            return []  # nothing recorded that day
         return chat_store.load_events(self._chat_dir, date)
 
     def _find_event(self, event_id: str, date: Optional[str] = None) -> dict:

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Sequence
 from zoneinfo import ZoneInfo
 
 from blink_watcher.settings import get_settings
@@ -72,9 +72,12 @@ def event_entry(event_id: str, video: str, metadata: str, summary: dict,
 
 
 def notification_prompt(recorded_at: str, summary: dict, offer_media: bool, camera: Optional[str] = None,
-                        security_mode: Optional[str] = None) -> str:
+                        security_mode: Optional[str] = None, auto_away: bool = False,
+                        vehicle_clips: Sequence[str] = ()) -> str:
     """The per-event input of the notify role: offer_media flag, local time,
-    camera, the security mode the clip was processed in, summary."""
+    camera, the security mode the clip was processed in, whether auto-away is
+    on (the household_vehicle answer is wanted) with the camera's nearby
+    vehicle-only clips (nearby_vehicle_clips), summary."""
     try:
         dt = datetime.fromisoformat(recorded_at)
         local_time = dt.strftime("%I:%M%p").lstrip("0").lower()
@@ -85,6 +88,46 @@ def notification_prompt(recorded_at: str, summary: dict, offer_media: bool, came
         f"offer_media: {'true' if offer_media else 'false'}",
         f"We have a new event received at {local_time} ({recorded_at})"
         + (f" from the {camera} camera" if camera else "")
-        + (f", while the security mode was {security_mode.upper()}" if security_mode else "") + ". Summary:",
+        + (f", while the security mode was {security_mode.upper()}" if security_mode else "") + ".",
+        *(["Auto-away: on (fill household_vehicle)"] if auto_away else []),
+        *([f"Vehicle-only clips of this camera close to this one (not downloaded, no description): "
+           f"{'; '.join(vehicle_clips)}"] if auto_away and vehicle_clips else []),
+        "Summary:",
         json.dumps(summary, indent=2),
     ])
+
+
+def nearby_vehicle_clips(settings, camera: Optional[str], recorded_at: str) -> list[str]:
+    """Clips of the same camera starting within AUTO_AWAY_CLIP_WINDOW_SEC of
+    the event that the download filter skipped and the camera tagged only
+    "vehicle", as "18:10:26, 60 s long, 71 s before this clip". A car pulling
+    in or driving off is often such a clip, the person getting out or in a
+    clip of its own."""
+    from blink_watcher.core.storage import RAW_VIDEOS, camera_folder, make_storage
+    window = settings.auto_away_clip_window_sec
+    try:
+        at = datetime.fromisoformat(recorded_at)
+    except ValueError:
+        return []
+    if not camera or window <= 0:
+        return []
+    raw = make_storage(settings, RAW_VIDEOS)
+    found = []
+    for key in sorted(raw.list(f"{at:%Y-%m-%d}/{camera_folder(camera)}/")):
+        if not key.endswith(".metadata.json"):
+            continue
+        try:
+            meta = raw.read_json(key)
+            start = datetime.fromisoformat(meta["recorded_at"])
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        original = meta.get("original") or {}
+        tags = set(original.get("provider_detections") or [])
+        offset = (start - at).total_seconds()
+        if ((meta.get("download") or {}).get("status") != "filtered" or "vehicle" not in tags
+                or "person" in tags or abs(offset) > window):
+            continue
+        length = original.get("duration_sec")
+        found.append(f"{start:%H:%M:%S}" + (f", {length:.0f} s long" if length else "")
+                     + f", {abs(offset):.0f} s {'before' if offset < 0 else 'after'} this clip")
+    return found

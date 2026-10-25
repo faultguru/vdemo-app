@@ -5,11 +5,14 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from blink_watcher.settings import get_settings
 from blink_watcher.vision.video import video_info
 
-TRIM_CRF = 23                  # x264 quality for the trimmed video (lower = better)
+_settings = get_settings()
+
+TRIM_CRF = _settings.trim_crf                        # x264 quality for the trimmed video (lower = better)
 TRIM_PRESET = "veryfast"       # x264 speed/size trade-off
-TRIM_MAX_RATE_RATIO = 0.90     # cap the re-encode at 90% of the source's average bitrate, so the trimmed file is always smaller
+TRIM_MAX_RATE_RATIO = _settings.trim_max_rate_ratio  # cap the re-encode at 90% of the source's average bitrate, so the trimmed file is always smaller
 
 
 def ffmpeg_exe() -> str:

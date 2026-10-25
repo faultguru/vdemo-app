@@ -35,9 +35,12 @@ from blink_watcher.core.storage import (
 )
 from blink_watcher.describe import REQUEST_FILES_GLOB, RESULT_FILE
 from blink_watcher.settings import Settings
+from blink_watcher.settings import get_settings
 
-RECENT_SEC = 180        # an ignored clip is reported this long after it was dropped
-STALLED_SEC = 180       # a work folder unchanged this long: failed, retried later
+_settings = get_settings()
+
+RECENT_SEC = _settings.webui_incoming_recent_sec    # an ignored clip is reported this long after it was dropped
+STALLED_SEC = _settings.webui_incoming_stalled_sec  # a work folder unchanged this long: failed, retried later
 STEPS = ["queued", "analyze", "trim", "frames", "describe", "save", "notify"]
 LABELS = {
     "queued": ("QUEUED", "waiting for the video processor"),
@@ -121,6 +124,19 @@ def _item(stage: str, md: dict, camera: str, stamp: str, **extra) -> dict:
         "tags": _tags(md, extra.pop("yolo", None)),
         **extra,
     }
+
+
+def pending_days(settings: Settings) -> dict[str, int]:
+    """Clips still in the pipeline (the processor's and the notifier's inbox) per
+    day, so a day whose clips are not processed yet (a catch-up) is listed too."""
+    days: dict[str, int] = {}
+    folders = [(make_storage(settings, PROCESSED_VIDEOS).local_path("inbox"), "*.metadata.json"),
+               (make_storage(settings, CHAT).local_path(EVENTS_INBOX), "*.event.json")]
+    for folder, pattern in folders:
+        for f in folder.glob(pattern):
+            day = f.name[:10]
+            days[day] = days.get(day, 0) + 1
+    return days
 
 
 def incoming(settings: Settings, day: str, now: Optional[float] = None) -> list[dict]:

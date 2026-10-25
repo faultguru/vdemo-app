@@ -10,18 +10,21 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from blink_watcher.settings import get_settings
 from blink_watcher.vision.video import open_video
 from blink_watcher.vision.yolo import get_yolo
 
-SCAN_FPS = 5.0                 # YOLO scan rate
+_settings = get_settings()
+
+SCAN_FPS = _settings.track_scan_fps                    # YOLO scan rate
 SCAN_CLASSES = ("person", "bicycle", "car", "motorcycle", "bus", "truck", "dog", "cat")
-DETECT_CONF = 0.35             # min YOLO confidence for a box
-YOLO_BATCH = 16                # frames per YOLO predict call
-TRACK_IOU = 0.3                # min IoU to continue a track
-TRACK_MAX_GAP_SEC = 1.0        # a track ends if unseen this long
-MIN_TRACK_SAMPLES = 3          # ignore tracks shorter than this (flicker)
-PERSON_MOVE_RATIO = 0.05       # a person track counts only if its center moves >=5% of the frame's long side - decorations, statues and posters don't
-OBJECT_MOVE_RATIO = 0.03       # a vehicle / animal track counts only if its center moves >=3% of the frame's long side - parked cars don't
+DETECT_CONF = _settings.track_detect_conf              # min YOLO confidence for a box
+YOLO_BATCH = _settings.track_yolo_batch                # frames per YOLO predict call
+TRACK_IOU = _settings.track_iou                        # min IoU to continue a track
+TRACK_MAX_GAP_SEC = _settings.track_max_gap_sec        # a track ends if unseen this long
+MIN_TRACK_SAMPLES = _settings.track_min_samples        # ignore tracks shorter than this (flicker)
+PERSON_MOVE_RATIO = _settings.track_person_move_ratio  # a person track counts only if its center moves >=5% of the frame's long side - decorations, statues and posters don't
+OBJECT_MOVE_RATIO = _settings.track_object_move_ratio  # a vehicle / animal track counts only if its center moves >=3% of the frame's long side - parked cars don't
 
 Box = list[float]                         # x0, y0, x1, y1
 Detection = tuple[Box, float, str]        # box, confidence, class name

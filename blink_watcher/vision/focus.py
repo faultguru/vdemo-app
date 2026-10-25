@@ -12,14 +12,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from blink_watcher.settings import get_settings
 from blink_watcher.vision.ffmpeg import trim_video
 from blink_watcher.vision.motion import MotionSegment
 from blink_watcher.vision.tracks import Sample, moving_person_tracks, scan_objects
 from blink_watcher.vision.video import video_info
 
+_settings = get_settings()
+
 log = logging.getLogger(__name__)
 
-TRIM_PAD_SEC = 1.0  # keep this much quiet video before the first and after the last activity
+TRIM_PAD_SEC = _settings.trim_pad_sec  # keep this much quiet video before the first and after the last activity
 
 
 @dataclass

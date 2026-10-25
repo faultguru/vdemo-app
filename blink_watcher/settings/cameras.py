@@ -39,6 +39,15 @@ class CameraSettings(BaseSettings):
     indoor_cameras: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
     poll_interval_seconds: int = 20
+    # fetch --daemon, when polls fail: the wait doubles up to this; the provider reconnects
+    # (reloading its session) after this many failures in a row.
+    fetch_retry_max_seconds: int = 300
+    fetch_reconnect_after_failures: int = 3
+    # fetch --daemon, when it starts: also the days since the last stored clip (a stop or an
+    # outage), at most this many days back; 0 = today only.
+    fetch_catchup_days: int = 7
+    # Tuning (.env.example documents each option):
+    fetch_catalog_refresh_sec: float = 3600.0
 
     @field_validator("cameras", "indoor_cameras", mode="before")
     @classmethod

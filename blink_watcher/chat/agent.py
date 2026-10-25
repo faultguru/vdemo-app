@@ -6,7 +6,7 @@
 
 Both run the same tool loop (ChatAgent._run). Rounds go to the fast model
 (CHAT_AGENT_MODEL / CHAT_AGENT_EFFORT); when it asks for a memory change
-(MEMORY_TOOLS: long-term memory or day notes), that round is redone by the
+(STATE_TOOLS: long-term memory, day notes or the security mode), that round is redone by the
 memory model (CHAT_AGENT_MEMORY_MODEL / CHAT_AGENT_MEMORY_EFFORT), which then
 finishes the turn. Memory changes only come from the user's chat
 instructions: notify() has no tools — it reads memory, day notes and the
@@ -42,18 +42,21 @@ from blink_watcher.chat import store as chat_store
 from blink_watcher.chat.memory import DayNotes, Memory
 from blink_watcher.chat.tools import EventToolError, EventTools
 from blink_watcher.chat.tools_schema import (
-    CONSOLE_TOOLS, MEMORY_TOOLS, NOTIFY_FIELDS, TOOLS, AgentStep, step_schema,
+    CONSOLE_TOOLS, NOTIFY_FIELDS, STATE_TOOLS, TOOLS, AgentStep, step_schema,
 )
 from blink_watcher.core import security_mode
 from blink_watcher.core.runtime import logs_dir
-from blink_watcher.pipeline.events import notification_prompt
+from blink_watcher.pipeline.events import nearby_vehicle_clips, notification_prompt
 from blink_watcher.settings import Settings
+from blink_watcher.settings import get_settings
+
+_settings = get_settings()
 
 log = logging.getLogger(__name__)
 
-MAX_TOOL_ROUNDS = 6
-MAX_PICTURES = 6           # view_event_pictures: events per call
-DEFAULT_LOOKBACK_DAYS = 14
+MAX_TOOL_ROUNDS = _settings.chat_max_tool_rounds
+MAX_PICTURES = _settings.chat_max_pictures            # view_event_pictures: events per call
+DEFAULT_LOOKBACK_DAYS = _settings.chat_lookback_days
 PROMPT_LOG = "chat_prompts.log"
 
 Progress = Callable[..., None]
@@ -121,6 +124,7 @@ class Notification:
     same_subject_as: list[str] = field(default_factory=list)  # earlier events with the same subject
     subject: str = ""                                          # trait signature of the main subject
     fulfills: list[str] = field(default_factory=list)         # one-off requests (alert-on:) this message fulfils
+    household_vehicle: str = "none"                            # departed | arrived | none (AUTO_AWAY)
 
 
 def parse_notification(reply: str) -> Notification:
@@ -175,6 +179,14 @@ class ChatAgent:
         log.info(f"  Chat history cleared: {prior} turn(s) removed from today's window")
         return prior
 
+    def _coming(self, date: str) -> str:
+        """`date` if it is today or later (note_for_date / clear_for_date); else ValueError."""
+        today = chat_store.local_now(self.settings.timezone).strftime("%Y-%m-%d")
+        date = (date or "").strip()
+        if date < today:
+            raise ValueError(f"{date} is in the past: note_for_date is for today or a coming day")
+        return date
+
     def _day(self) -> Optional[str]:
         """The active day, else the most recent date with events — where
         `note_today` / `clear_today` write in chat. None if there are no events."""
@@ -214,10 +226,26 @@ class ChatAgent:
                 return {"status": self.day_notes.note(args["text"], date=self._day(), time=args.get("time"))}
             if name == "clear_today":
                 return {"status": self.day_notes.clear(args["substring"], date=self._day())}
+            if name == "note_for_date":
+                return {"status": self.day_notes.note(args["text"], date=self._coming(args["date"]),
+                                                      time=args.get("time"))}
+            if name == "clear_for_date":
+                return {"status": self.day_notes.clear(args["substring"], date=self._coming(args["date"]))}
+            if name == "set_security_mode":
+                state = security_mode.set_mode(self.settings, args["mode"], "chat", args.get("until"),
+                                               args.get("note"))
+                return {"status": f"security mode set: {state.headline()}"}
+            if name == "schedule_security_mode":
+                entry = security_mode.schedule(self.settings, args["mode"], args["start"], args.get("end"),
+                                               "chat", args.get("note"))
+                return {"status": f"scheduled: {entry.describe()}",
+                        "mode_now": security_mode.current(self.settings).headline()}
+            if name == "cancel_security_schedule":
+                return {"status": f"cancelled: {security_mode.cancel(self.settings, args['id']).describe()}"}
             if name == "get_day_notes":
                 return {"date": args["date"], "notes": self.day_notes.read(args["date"]) or "(empty)"}
             return {"error": f"unknown tool: {name}"}
-        except EventToolError as e:
+        except (EventToolError, ValueError) as e:
             return {"error": str(e)}
         except Exception as e:  # noqa: BLE001
             log.exception("tool %s failed", name)
@@ -232,8 +260,10 @@ class ChatAgent:
         until the model gives the final reply (at most MAX_TOOL_ROUNDS rounds).
         A reply given together with tool calls is final unless a tool failed.
         `extra`: role-specific answer fields, returned in Turn.answer."""
+        mode = security_mode.current(self.settings)
         system = prompts.system_prompt(base, self.memory, self.day_notes, self.settings.timezone, self._day(),
-                                       security_mode=security_mode.prompt_block(security_mode.current(self.settings)))
+                                       security_mode=security_mode.prompt_block(
+                                           mode, tuple(security_mode.upcoming(self.settings))))
         if events_block:
             system += "\n\n" + events_block
         system += "\n\n" + (prompts.tools_block(tools) if tools else prompts.no_tools_block())
@@ -278,7 +308,7 @@ class ChatAgent:
                 step = await ask(round_idx, user_text, self.memory_model, self.memory_effort, "-memory")
             else:
                 step = await ask(round_idx, user_text, self.model, self.effort, "")
-                wanted = sorted({c.name for c in step.tool_calls} & MEMORY_TOOLS)
+                wanted = sorted({c.name for c in step.tool_calls} & STATE_TOOLS)
                 if wanted and self.memory_model != self.model:
                     progress(f"[round {round_idx}] Memory change requested ({', '.join(wanted)}) - round handed "
                              f"over to {self.memory_model}; {self.model}'s answer discarded")
@@ -328,9 +358,12 @@ class ChatAgent:
         w.r.t. chat history (the message enters it once sent). Returns
         (notification, turn, per-event prompt)."""
         progress = progress or (lambda msg, level=logging.INFO: log.log(level, msg))
+        auto_away = self.settings.auto_away
         prompt = notification_prompt(event.get("recorded_at") or "", event.get("summary") or {},
                                      chat_store.should_offer_media(self.settings.chat_dir), event.get("camera"),
-                                     event.get("security_mode"))
+                                     event.get("security_mode"), auto_away,
+                                     nearby_vehicle_clips(self.settings, event.get("camera"),
+                                                          event.get("recorded_at") or "") if auto_away else ())
         self._active_day = chat_store.event_date(event["event_id"])
         try:
             earlier = prompts.events_block(self.tools, self._active_day, exclude=event["event_id"],
@@ -344,6 +377,7 @@ class ChatAgent:
         notification.same_subject_as = list(turn.answer.get("same_subject_as") or [])
         notification.subject = (turn.answer.get("subject") or "").strip()
         notification.fulfills = [r.strip() for r in turn.answer.get("fulfills") or [] if r.strip()]
+        notification.household_vehicle = turn.answer.get("household_vehicle") or "none"
         return notification, turn, prompt
 
     async def handle(self, chat_id: str, user_text: str, focus_date: Optional[str] = None,
@@ -390,7 +424,7 @@ class ChatAgent:
         progress(f"Generating reply with {self.model} (memory changes: {self.memory_model}) - "
                  f"day notes {self._day() or '(no events yet)'}, {len(self.tool_list)} tools available...")
 
-        with tempfile.TemporaryDirectory(prefix="chat-agent-") as tmp:
+        with tempfile.TemporaryDirectory(prefix="chat-agent-", ignore_cleanup_errors=True) as tmp:  # a file an interrupted LLM call still holds must not turn Ctrl+C into an agent error
             turn = await self._run(prompts.CHAT + scope, self.tool_list, history, Path(tmp), progress,
                                    events_block=prompts.events_block(self.tools, self._day()),
                                    attachments=[*(attachments or []), *(context_images or [])])

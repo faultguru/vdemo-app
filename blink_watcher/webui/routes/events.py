@@ -14,6 +14,7 @@ events (and activities), the camera list, a clip's .metadata.json and media file
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
@@ -21,6 +22,7 @@ from aiohttp import web
 
 from blink_watcher.chat import store as chat_store
 from blink_watcher.webui.context import context, date_param
+from blink_watcher.webui.incoming import pending_days
 
 log = logging.getLogger(__name__)
 
@@ -50,11 +52,13 @@ async def cameras(request: web.Request) -> web.Response:
 async def days(request: web.Request) -> web.Response:
     ctx = context(request)
     out = []
-    for date in sorted(chat_store.event_dates(ctx.chat_dir), reverse=True):
+    pending = await asyncio.to_thread(pending_days, ctx.settings)
+    for date in sorted(set(chat_store.event_dates(ctx.chat_dir)) | set(pending), reverse=True):
         events = chat_store.load_events(ctx.chat_dir, date)
         out.append({
             "date": date,
             "events": len(events),
+            "pending": pending.get(date, 0),  # clips still being processed
             "sent": sum(1 for e in events if (e.get("notification") or {}).get("decision") == "send"),
             "threats": sum(1 for e in events if ((e.get("summary") or {}).get("threat") or {}).get("level")
                            not in (None, "none")),

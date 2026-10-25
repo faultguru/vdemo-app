@@ -41,35 +41,57 @@ Usage:
 
 --daemon keeps one provider session and re-lists today's clips (the day
 follows midnight) every poll; clips already stored are skipped, so only new
-ones are downloaded and queued. A failed poll is logged and retried on the
-next one. The camera catalog is refreshed hourly.
+ones are downloaded and queued. When it starts, it also catches up the days
+since the last stored clip (FETCH_CATCHUP_DAYS at most), one day per poll,
+oldest first, after each poll of today. A failed poll is logged and retried on the
+next one, with a growing wait (FETCH_RETRY_MAX_SECONDS); after
+FETCH_RECONNECT_AFTER_FAILURES failures in a row the provider reconnects
+(reloading its saved session, else logging in again). Every poll is reported
+to core.health: as the blink dependency (Telegram is told when polling keeps
+failing, and when it recovers), and as fetch itself, which fails only on a
+local error such as a full disk (the supervisor notices a daemon that stops
+polling). A failed poll
+is a warning, with the traceback only the first time that error is seen. The
+camera catalog is refreshed hourly; the free disk space is checked every poll
+(DISK_MIN_FREE_GB: an error, so Telegram is told).
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
 import logging
+import re
+import shutil
+import socket
 import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import PurePosixPath
 from typing import Optional
 from zoneinfo import ZoneInfo
 
+import aiohttp
+
 from blink_watcher.core.filters import FILTER_NAMES, passes, summary
-from blink_watcher.core.logs import setup_logging
+from blink_watcher.core.health import Dependency, Health, tell
+from blink_watcher.core.logs import log_clip, setup_logging
 from blink_watcher.core.storage import (
     IGNORED_VIDEOS, PROCESSED_VIDEOS, RAW_VIDEOS, inbox_key, make_storage, metadata_key, raw_clip_key,
 )
 from blink_watcher.pipeline.clip_metadata import (
     clip_metadata, decided, filtered_by, filtered_download, skipped_download,
 )
-from blink_watcher.providers import CameraProvider, ProviderClip, ProviderError, catalog, make_provider
+from blink_watcher.providers import (
+    CameraProvider, ProviderClip, ProviderError, TwoFactorRequired, catalog, make_provider,
+)
 from blink_watcher.settings import Settings, load_settings
+from blink_watcher.settings import get_settings
+
+_settings = get_settings()
 
 log = logging.getLogger("blink_watcher.pipeline.fetch")
 
 PROGRAM = "fetch"
-CATALOG_REFRESH_SEC = 3600.0   # --daemon: camera catalog refresh interval
+CATALOG_REFRESH_SEC = _settings.fetch_catalog_refresh_sec  # --daemon: camera catalog refresh interval
 
 
 class Fetcher:
@@ -85,6 +107,7 @@ class Fetcher:
         self.raw = make_storage(settings, RAW_VIDEOS)
         self.processed = make_storage(settings, PROCESSED_VIDEOS)
         self.ignored = make_storage(settings, IGNORED_VIDEOS)
+        self.login_needed: Optional[str] = None  # --daemon: reconnecting waits for the user (2FA)
 
     @property
     def label(self) -> str:
@@ -180,7 +203,19 @@ class Fetcher:
         """Download the clips not stored yet; returns the number downloaded. `quiet`
         (daemon): the summary is logged only when something was downloaded."""
         downloaded = skipped = filtered = 0
+        try:
+            downloaded, skipped, filtered = await self._download(clips, limit)
+        finally:
+            log_clip(None)
+        if downloaded or not quiet:
+            log.info("done: %d downloaded, %d already stored, %d not downloaded (filter / camera not enabled)",
+                     downloaded, skipped, filtered)
+        return downloaded
+
+    async def _download(self, clips: list[ProviderClip], limit: Optional[int]) -> tuple[int, int, int]:
+        downloaded = skipped = filtered = 0
         for clip in clips:
+            log_clip(clip.camera, clip.recorded_at.astimezone(self.tz))
             key = self._key(clip)
             labels = ",".join(clip.detections) or "-"
             if self.raw.exists(key):
@@ -191,11 +226,10 @@ class Fetcher:
             if self._decided_before(key):
                 filtered += 1  # decided on an earlier pass: final, whatever the settings say now
                 continue
-            when = f"{clip.recorded_at.astimezone(self.tz):%H:%M:%S}"
             if not self.settings.camera_enabled(clip.camera):
                 self._write_metadata(clip, key, skipped_download(self.tz))
                 filtered += 1
-                log.debug("not downloaded (camera not enabled): %s %s", clip.camera.strip(), when)
+                log.debug("not downloaded (camera not enabled)")
                 continue
             camera_filter = self.filter_of(clip.camera)
             if not passes(camera_filter, clip.detections):
@@ -206,8 +240,8 @@ class Fetcher:
                     "at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "by": "filter",
                     "reason": download["reason"]}})
                 filtered += 1
-                log.info("not downloaded (filter %s): %s %s [%s] - metadata marked filtered: %s",
-                         camera_filter, clip.camera.strip(), when, labels, self.raw.uri(metadata_key(key)))
+                log.info("not downloaded (filter %s) [%s] - metadata marked filtered: %s",
+                         camera_filter, labels, self.raw.uri(metadata_key(key)))
                 continue
             if limit is not None and downloaded >= limit:
                 break
@@ -217,32 +251,140 @@ class Fetcher:
             downloaded += 1
             log.info("downloaded %s [%s] (%d KB) -> %s", self.raw.uri(key), labels, size // 1024,
                      self.processed.uri(inbox))
-        if downloaded or not quiet:
-            log.info("done: %d downloaded, %d already stored, %d not downloaded (filter / camera not enabled)",
-                     downloaded, skipped, filtered)
-        return downloaded
+        return downloaded, skipped, filtered
+
+    def catchup_days(self, today: date) -> list[date]:
+        """The days before today to fetch again at start, oldest first: from the
+        last day with a stored clip (it may have stopped mid-day) to yesterday,
+        FETCH_CATCHUP_DAYS at most."""
+        days = [today - timedelta(days=n) for n in range(self.settings.fetch_catchup_days, 0, -1)]
+        stored = [d for d in days if next(iter(self.raw.list(f"{d:%Y-%m-%d}/")), None) is not None]
+        return days[days.index(stored[-1]):] if stored else days
 
     async def daemon(self, interval: int, limit: Optional[int]) -> None:
-        """Poll today's clips forever (the day follows midnight); a failed poll is retried on the next one."""
+        """Poll today's clips forever (the day follows midnight), after catching up the
+        days missed while stopped; a failed poll is retried with a growing wait,
+        reconnecting the provider and telling Telegram if it goes on."""
+        s = self.settings
         log.info("daemon mode: polling %s every %ds for today's clips of %s; stored clips are skipped "
                  "(Ctrl+C stops)", self.provider.name, interval, self.label)
+        catchup = self.catchup_days(datetime.now(self.tz).date())
+        if catchup:
+            log.info("catching up %d earlier day(s) first: %s", len(catchup),
+                     ", ".join(f"{d:%Y-%m-%d}" for d in catchup))
         idle, catalog_at = False, time.monotonic()
+        health = Health(s, PROGRAM)
+        blink = Dependency(s, "blink", alert=True, log_name=PROGRAM)
+        failures, failing_since = 0, None
+        seen_errors: set[str] = set()  # kinds of poll errors already logged with their traceback
+        disk = DiskCheck(s)
         while True:
             if time.monotonic() - catalog_at >= CATALOG_REFRESH_SEC:
                 catalog_at = time.monotonic()
                 await refresh_catalog(self.settings, self.provider)
+            disk.check()
             try:
                 today = datetime.now(self.tz).date()
                 downloaded = await self.download(await self.day_clips(today), limit, quiet=True)
-            except Exception:  # noqa: BLE001 - a failed poll is retried on the next one
-                log.exception("poll failed - retrying in %ds", interval)
-                downloaded = 0
+                if catchup:  # one missed day per poll, after today's new clips
+                    log.info("catch-up: %s", f"{catchup[0]:%Y-%m-%d}")
+                    await self.download(await self.day_clips(catchup[0]), limit, quiet=False)
+                    catchup.pop(0)
+                    if not catchup:
+                        log.info("catch-up done")
+                    health.ok()
+                    blink.ok()
+                    continue
+            except Exception as e:  # noqa: BLE001 - a failed poll is retried
+                failures += 1
+                failing_since = failing_since or datetime.now(self.tz)
+                wait = min(interval * 2 ** (failures - 1), max(interval, s.fetch_retry_max_seconds))
+                error = _describe(e)
+                kind = re.sub(r"\d+", "#", error)
+                log.warning("poll failed (%d in a row, since %s): %s - retrying in %ds",
+                            failures, f"{failing_since:%H:%M}", error, wait, exc_info=kind not in seen_errors)
+                seen_errors.add(kind)
+                if self.login_needed:
+                    error += f"; {self.login_needed}"
+                elif s.fetch_reconnect_after_failures > 0 and failures % s.fetch_reconnect_after_failures == 0:
+                    problem = await self._reconnect()
+                    if problem:
+                        error += f"; reconnect failed: {problem}"
+                if _local(e):
+                    health.failed(error)
+                else:
+                    health.ok()
+                    blink.failed(error)
+                await asyncio.sleep(wait)
+                continue
+            health.ok()
+            blink.ok()
+            failures, failing_since = 0, None
             if downloaded:
                 idle = False
             elif not idle:
                 log.info("waiting for new clips...")
                 idle = True
             await asyncio.sleep(interval)
+
+    async def _reconnect(self) -> Optional[str]:
+        """A new provider session (the old one may hold an expired token); the error if it failed.
+        A login that needs 2FA is not tried again: each try would send another PIN, so it waits
+        for BLINK_2FA_CODE (a settings change restarts fetch)."""
+        log.warning("reconnecting to %s", self.provider.name)
+        try:
+            await self.provider.close()
+            await self.provider.connect()
+        except TwoFactorRequired as e:
+            self.login_needed = f"login needs the 2FA PIN Blink emailed: set BLINK_2FA_CODE ({e})"
+            log.error("reconnect stopped: %s", self.login_needed, extra={"alert": False})  # told below
+            tell(self.settings, f"{PROGRAM.upper()}_LOGIN",
+                 "Action needed: Blink wants a new login and emailed a PIN. Enter it as BLINK_2FA_CODE "
+                 "on the configuration page; downloads stay stopped until then.")
+            return self.login_needed
+        except Exception as e:  # noqa: BLE001 - tried again after the next failures
+            log.warning("reconnect failed: %s", _describe(e))
+            return _describe(e)
+        log.info("reconnected to %s", self.provider.name)
+        return None
+
+
+class DiskCheck:
+    """DISK_MIN_FREE_GB: an error when the storage disk gets too full (core.alerts
+    tells Telegram), a line when there is room again."""
+
+    def __init__(self, settings: Settings):
+        self.settings = settings
+        self.low = False
+
+    def check(self) -> None:
+        limit = self.settings.disk_min_free_gb
+        if limit <= 0:
+            return
+        try:
+            free = shutil.disk_usage(self.settings.storage_path).free / 2**30
+        except OSError as e:
+            log.warning("disk space not checked: %s", e)
+            return
+        if free < limit and not self.low:
+            log.error("disk almost full: %.1f GB free for %s (DISK_MIN_FREE_GB=%g) - delete old clips or "
+                      "move STORAGE_ROOT", free, self.settings.storage_path, limit)
+        elif free >= limit and self.low:
+            log.info("disk space ok again: %.1f GB free", free)
+        self.low = free < limit
+
+
+def _local(e: BaseException) -> bool:
+    """A failure of this machine (disk, files) rather than of the provider's cloud."""
+    return isinstance(e, OSError) and not isinstance(
+        e, (ConnectionError, TimeoutError, socket.gaierror, aiohttp.ClientError))
+
+
+def _describe(e: BaseException) -> str:
+    """The error and, for wrapped errors (blinkpy's TokenRefreshFailed has no text), its cause."""
+    text = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
+    cause = e.__cause__
+    return f"{text} <- {_describe(cause)}" if cause is not None else text
 
 
 async def refresh_catalog(settings: Settings, provider: CameraProvider) -> None:

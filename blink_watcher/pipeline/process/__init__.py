@@ -2,7 +2,8 @@
 through the analysis pipeline, including the LLM description.
 
 Reads <PROCESSED_VIDEOS>/inbox/<stamp>-<CAMERA>.metadata.json (queued by the
-fetcher), oldest recording first, and handles up to PROCESS_LIMIT of them
+fetcher), today's first, then earlier days' (a catch-up), each oldest recording
+first, and handles up to PROCESS_LIMIT of them
 (0 = all). Clips whose provider detections don't match their camera's filter
 (CAMERA_FILTERS: always | person | person_or_vehicle) are skipped. For each
 matching clip (in the home security mode, an indoor camera's clip is saved as
@@ -78,10 +79,13 @@ from __future__ import annotations
 import argparse
 import logging
 import time
+from datetime import datetime
 from pathlib import PurePosixPath
 from typing import Optional
 
-from blink_watcher.core.daemon import run_daemon
+from blink_watcher.core.daemon import run_daemon, unreadable
+from blink_watcher.core.health import Health
+from blink_watcher.core.logs import log_clip
 from blink_watcher.core import security_mode
 from blink_watcher.core.filters import FILTER_NAMES, describe, passes, summary
 from blink_watcher.core.logs import setup_logging
@@ -99,16 +103,18 @@ Entry = tuple[str, dict]  # (inbox key, queued metadata)
 
 
 def read_inbox(processed: Storage) -> list[Entry]:
-    """Every queued clip, oldest recording first."""
+    """Every queued clip: today's first, then earlier days' (a catch-up), each oldest recording first."""
     entries = []
     for key in processed.list(INBOX):
         if not key.endswith(".metadata.json"):
             continue
         try:
             entries.append((key, processed.read_json(key)))
-        except ValueError as e:
-            log.warning(f"Unreadable inbox file {key}: {e} - left in place")
-    return sorted(entries, key=lambda e: e[1].get("recorded_at") or "")
+        except (OSError, ValueError) as e:
+            unreadable(log, key, e)
+    today = datetime.now().astimezone().strftime("%Y-%m-%d")
+    return sorted(entries, key=lambda e: (not (e[1].get("recorded_at") or "").startswith(today),
+                                          e[1].get("recorded_at") or ""))
 
 
 def print_header(settings: Settings, log_file, areas: Areas, opts: Options, waiting: int, total: int) -> None:
@@ -129,13 +135,17 @@ def print_header(settings: Settings, log_file, areas: Areas, opts: Options, wait
     log.info(f"Daemon: {'enabled' if opts.daemon else 'disabled - exits after this run'}")
 
 
-def process_batch(processor: ClipProcessor, batch: list[Entry]) -> list[str]:
-    """Process `batch`; returns the inbox keys of the clips that failed."""
+def process_batch(processor: ClipProcessor, batch: list[Entry], health: Optional[Health] = None) -> dict[str, str]:
+    """Process `batch`; returns the clips that failed: inbox key -> the error.
+    `health` gets a heartbeat per clip (a long batch is not a stuck service)."""
     areas, opts = processor.areas, processor.opts
     kept = dropped = skipped = 0
-    failed: list[str] = []
+    failed: dict[str, str] = {}  # inbox key -> the error
     t_run = time.perf_counter()
     for n, (inbox_key, md) in enumerate(batch, start=1):
+        if health:
+            health.beat()
+        log_clip(md.get("camera"), md.get("recorded_at"))
         clip = Clip(inbox_key, md, link_key(areas.raw, md["original"]))
         detections = md["original"].get("provider_detections") or []
         when = (md.get("recorded_at") or "?")[:19].replace("T", " ")
@@ -155,10 +165,11 @@ def process_batch(processor: ClipProcessor, batch: list[Entry]) -> list[str]:
             else:
                 dropped += 1
         except Exception as e:
-            # Leave the inbox file so the clip is retried next run.
-            log.exception("failed to process %s", inbox_key)
-            log.error(f"  Processing failed: {type(e).__name__}: {e} - inbox entry retained for retry")
-            failed.append(inbox_key)
+            # Leave the inbox file so the clip is retried (core.daemon: later each time; an error after a few)
+            log.warning(f"  Processing failed: {type(e).__name__}: {e} - inbox entry retained for retry",
+                        exc_info=True)
+            failed[inbox_key] = f"{type(e).__name__}: {e}"
+    log_clip(None)
 
     left = len(read_inbox(areas.processed))
     log.info(f"Run completed in {time.perf_counter() - t_run:.1f}s: {kept} kept, {dropped} ignored, "
@@ -180,7 +191,8 @@ def run(settings: Settings, opts: Options, log_file) -> int:
         return due[:opts.limit] if opts.limit else due
 
     if opts.daemon:
-        return run_daemon(log, "clips", next_batch, lambda batch: process_batch(processor, batch))
+        health = Health(settings, PROGRAM)
+        return run_daemon(log, "clips", next_batch, lambda batch: process_batch(processor, batch, health), health)
     return 1 if process_batch(processor, entries[:total]) else 0
 
 

@@ -11,21 +11,24 @@ from typing import Optional
 import cv2
 import numpy as np
 
+from blink_watcher.settings import get_settings
 from blink_watcher.vision.video import capture_fps, capture_info, open_video
+
+_settings = get_settings()
 
 log = logging.getLogger(__name__)
 
-WARMUP_FRAMES = 35             # feed MOG2 this many frames before trusting its output (absorbs the camera's auto-exposure flash)
-LEARNING_RATE = 0.0008         # low -> subjects that linger don't get absorbed as background
-MIN_CONTOUR_AREA_RATIO = 0.0015  # a single contour must cover >=0.15% of frame to count (filters rain, leaves)
-MIN_FRAME_AREA_RATIO = 0.0025  # sum of qualifying contours must cover >=0.25% of frame
-MAX_FRAME_AREA_RATIO = 0.90    # last-resort cap: close subjects can cover 30-60% of the frame; only near-total coverage is rejected
-FLASH_MEAN_DELTA = 12.0        # a grayscale mean change this large between sampled frames is an exposure / lighting flash, not motion
-MIN_SEGMENT_SEC = 0.4          # drop blips shorter than this
-MERGE_GAP_SEC = 1.0            # stitch segments separated by smaller gaps
-KEYFRAMES_PER_SEGMENT = 8      # evenly sampled moving frames
-MOTION_MAX_SIDE = 960          # downscale frames to this before MOG2 - big speedup, small subjects survive
-MOTION_FRAME_STRIDE = 3        # analyze every Nth frame (30 fps source -> ~10 fps motion sampling)
+WARMUP_FRAMES = _settings.motion_warmup_frames                # feed MOG2 this many frames before trusting its output (absorbs the camera's auto-exposure flash)
+LEARNING_RATE = _settings.motion_learning_rate                # low -> subjects that linger don't get absorbed as background
+MIN_CONTOUR_AREA_RATIO = _settings.motion_min_contour_area_ratio  # a single contour must cover >=0.15% of frame to count (filters rain, leaves)
+MIN_FRAME_AREA_RATIO = _settings.motion_min_frame_area_ratio  # sum of qualifying contours must cover >=0.25% of frame
+MAX_FRAME_AREA_RATIO = _settings.motion_max_frame_area_ratio  # last-resort cap: close subjects can cover 30-60% of the frame; only near-total coverage is rejected
+FLASH_MEAN_DELTA = _settings.motion_flash_mean_delta          # a grayscale mean change this large between sampled frames is an exposure / lighting flash, not motion
+MIN_SEGMENT_SEC = _settings.motion_min_segment_sec            # drop blips shorter than this
+MERGE_GAP_SEC = _settings.motion_merge_gap_sec                # stitch segments separated by smaller gaps
+KEYFRAMES_PER_SEGMENT = _settings.motion_keyframes_per_segment  # evenly sampled moving frames
+MOTION_MAX_SIDE = _settings.motion_max_side                   # downscale frames to this before MOG2 - big speedup, small subjects survive
+MOTION_FRAME_STRIDE = _settings.motion_frame_stride           # analyze every Nth frame (30 fps source -> ~10 fps motion sampling)
 
 
 @dataclass

@@ -147,6 +147,45 @@ When the subject was already reported on another camera minutes ago,
 phrase the message as their movement ("... has now gone round to the
 backyard") rather than a new sighting, or SKIP if nothing new happened.
 
+## The household's vehicles (auto-away)
+
+When the per-event input has an "Auto-away: on" line, fill
+`household_vehicle` for EVERY event, sent or skipped. The household's
+vehicles are the ones long-term memory describes; a vehicle that matches
+that description, or that the residents get into or out of on the
+property, counts as theirs.
+
+- `departed` — this event shows a household vehicle leaving: someone gets
+  in and it drives off the driveway, or it backs out of where it was
+  parked and drives away; or a resident gets in at the driver's door and
+  closes it, with a vehicle-only clip of this camera starting just after.
+- `arrived` — it pulls into the driveway or parks on the property; or,
+  with a vehicle-only clip of this camera just before (the pull-in
+  itself), someone who fits a resident gets out of it or is at its open
+  driver's door and then walks to the house.
+- `none` — anything else: it stays parked and people only walk past, load
+  or unload it and stay home, a similar vehicle passes on the street, or
+  you are unsure.
+
+The camera only downloads clips with a person in them, so the vehicle
+moving is often in a clip of its own that has no description: the input
+lists those ("Vehicle-only clips of this camera close to this one"). On
+their own they prove nothing (street traffic makes them too), but they
+fit a car pulling in just before someone gets out of it, or driving off
+just after someone got in.
+
+Match on what the description says about the vehicle (colour, body
+style; a make only if the describer named one) against long-term memory,
+and on who gets in or out: someone whose general description (age,
+height, hair) fits a resident in long-term memory. The describer does
+not know the residents: in AWAY mode it calls everyone a visitor and
+flags anyone on the property, so judge by appearance, not by its type,
+labels or threat level. Your answer switches the security mode, so say
+`departed` / `arrived` only when the evidence above is there. Without the "Auto-away"
+line, always answer `none`. This field changes nothing about whether to
+send a message: the residents leaving or coming home in their own car is
+routine activity.
+
 ## Correlating with earlier events
 
 Use the day's earlier events to phrase the alert as continuity, not a

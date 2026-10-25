@@ -14,9 +14,12 @@ from typing import Optional
 from blink_watcher.ai.base import LLMClient, LLMRequest, LLMResponse, LLMThrottled, RetryPolicy, Usage
 from blink_watcher.ai.claude_cli.client import content_blocks
 from blink_watcher.ai.transient import one_line
+from blink_watcher.settings import get_settings
+
+_settings = get_settings()
 
 REQUEST_API = "llm.request.api.json"
-MAX_TOKENS = 16000  # thinking is on by default on current models; room for it plus the answer
+MAX_TOKENS = _settings.claude_api_max_tokens  # thinking is on by default on current models; room for it plus the answer
 CREDENTIALS = Path.home() / ".claude" / ".credentials.json"
 TRANSIENT_STATUS = (429, 500, 502, 503, 504, 529)
 

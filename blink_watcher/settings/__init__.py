@@ -1,7 +1,7 @@
 """Application settings, from the environment and the project's .env.
 
 Settings is composed of one section per area — storage, cameras, processing,
-ai, chat, webui, stitch, security — plus each camera provider's own section, so an
+ai, chat, webui, stitch, security, vision — plus each camera provider's own section, so an
 area's options live next to the code that owns them. Field names are the
 environment keys in lower case; .env.example documents every one of them
 (the configuration page is built from it, see settings.document).
@@ -22,13 +22,14 @@ from blink_watcher.settings.security import SecuritySettings
 from blink_watcher.settings.processing import ProcessingSettings
 from blink_watcher.settings.stitch import StitchSettings
 from blink_watcher.settings.storage import StorageSettings
+from blink_watcher.settings.vision import VisionSettings
 from blink_watcher.settings.webui import WebUISettings
 
 __all__ = ["ALL_CAMERAS", "Settings", "get_settings", "load_settings"]
 
 
 class Settings(StorageSettings, CameraSettings, ProcessingSettings, AISettings, ChatSettings,
-               WebUISettings, StitchSettings, SecuritySettings, BlinkSettings):
+               WebUISettings, StitchSettings, SecuritySettings, VisionSettings, BlinkSettings):
     model_config = SettingsConfigDict(env_file=ENV_FILE, env_file_encoding="utf-8", extra="ignore")
 
     @property

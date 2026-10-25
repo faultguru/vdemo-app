@@ -30,6 +30,7 @@ data-storage/
   chat/.notify_state.json                                 when media was last offered
   state/cameras.json                                      camera catalog
   state/blink/session.json                                Blink session (tokens: keep private)
+  state/health/<name>.json                                health                  (fetch, process, notify, chat-bot; blink, telegram, ai)
   logs/<program>.log, logs/chat_prompts.log, logs/run.log
   models/yolov8s.pt (+ ONNX export for DirectML)
 ```
@@ -143,7 +144,12 @@ notifier, chat bot), always under `<date>/events.json.lock`.
  "photo": "videos.processed/2026-10-17/Front_Door/2026-10-17-11-22-04.jpg"}
 ```
 
-Removed by the chat bot once sent.
+Removed by the chat bot once sent. System messages are queued here too
+(`{"date", "text"}`, no `event_id`): `<stamp>-<PROGRAM>_FAILING` /
+`_RECOVERED` from `core.health`, `<stamp>-FETCH_LOGIN` (Blink needs a 2FA
+PIN), from the supervisor `<stamp>-<SERVICE>_STUCK`, `_CRASHING`,
+`_RUNNING`, and `<stamp>-MODE_SCHEDULED` / `MODE_ENDED` / `MODE_AUTO_AWAY` /
+`MODE_AUTO_HOME` (a security mode change made on its own).
 
 ## Chat state
 
@@ -181,8 +187,17 @@ result. Removed when the clip / event is done (kept with `--preserve`).
 
 - `state/cameras.json` — the camera catalog:
   `{"updated_at": "...", "cameras": [{"name", "provider", "id", "model", "has_own_person_detection"}]}`.
+- `state/health/<name>.json` — the health of a service (fetch, process,
+  notify, chat-bot) or of an outside service (blink, telegram, ai, written by
+  the programs that use it; ai by any of them, the last call wins), rewritten
+  on every change and at least once a minute while in use:
+  `{"program", "label", "type": "service" | "dependency", "updated_at", "ok", "last_ok_at", "failures", "failing_since", "error", "alerted"}`.
 - `state/blink/session.json` — the Blink login session (tokens), so a
   restart needs no new login or 2FA. Treat it like a password.
 - `state/security_mode.json` — the security mode:
-  `{"mode": "normal" | "home" | "away" | "vacation", "since", "until" (HOME only), "by": "console" | "telegram" | "auto"}`;
-  `state/security_mode.history.jsonl` — every change, one per line.
+  `{"mode": "normal" | "home" | "away" | "vacation", "since", "until" (then back to normal; null: until changed),
+  "by": "console" | "telegram" | "chat" | "schedule" | "auto-away" | "auto", "note"}`;
+  `state/security_mode.history.jsonl` — every change, one per line;
+  `state/security_mode.schedule.json` — modes planned ahead:
+  `{"entries": [{"id", "mode", "start", "end", "by", "note", "created_at"}]}`, soonest first; an entry
+  leaves the file when it takes effect (`core.security_mode`).

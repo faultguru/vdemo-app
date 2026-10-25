@@ -9,7 +9,15 @@ dropped. "/clear" empties today's chat history window; "/normal", "/home",
 Also sends the messages the notifier queues in chat/outbox/: each file is one
 message — text + the event's thumbnail as the photo — which is delivered to
 Telegram, then recorded as sent (chat history + "sent_at" in the event list)
-and removed. A network drop is logged in one line and retried; Ctrl+C stops.
+and removed. A message Telegram refuses (a bad request) is sent again
+without its photo, else moved to outbox/failed/ (an error: Telegram is told
+with a short message). When Telegram cannot be reached, the outbox and the
+incoming poll each log one warning and retry with a growing wait (up to
+RETRY_MAX_SECONDS), and log a line once it works again. Ctrl+C stops.
+
+Health (core.health): the chat-bot reports each pass of its incoming poll,
+and Telegram's state as the telegram dependency (failing while it cannot be
+reached or refuses the bot).
 Logs go to stdout and STORAGE_ROOT/logs/chat-bot.log.
 
 Usage:
@@ -35,14 +43,55 @@ from blink_watcher.chat.agent import ChatAgent
 from blink_watcher.chat.telegram import TelegramClient, TelegramError
 from blink_watcher.chat.tools import EventTools
 from blink_watcher.core import security_mode
+from blink_watcher.core.health import Dependency, Health
 from blink_watcher.core.logs import setup_logging
 from blink_watcher.settings import Settings, load_settings
+from blink_watcher.settings import get_settings
+
+_settings = get_settings()
 
 log = logging.getLogger("blink_watcher.chat.bot")
 
 PROGRAM = "chat-bot"
-OUTBOX_POLL_SECONDS = 2.0
-RETRY_SECONDS = 5        # after a failed getUpdates
+OUTBOX_POLL_SECONDS = _settings.telegram_outbox_poll_sec
+RETRY_SECONDS = _settings.telegram_retry_sec              # first wait after Telegram could not be reached; doubles while it goes on
+RETRY_MAX_SECONDS = _settings.telegram_retry_max_sec
+FAILED = "failed"        # outbox/failed/: messages Telegram refused
+TRANSIENT = (aiohttp.ClientError, asyncio.TimeoutError, OSError)
+
+
+class Outage:
+    """Telegram not reachable: one warning when it starts, a growing wait, one line when it ends."""
+
+    def __init__(self, what: str, health: Optional[Dependency] = None):
+        self.what = what
+        self.health = health  # the telegram dependency
+        self.since: Optional[float] = None
+        self.wait = RETRY_SECONDS
+
+    def failed(self, e: BaseException, note: str = "") -> float:
+        """The seconds to wait before trying again."""
+        retry_after = getattr(e, "retry_after", None)
+        if self.health:
+            self.health.failed(f"not reachable: {_describe(e)}")
+        if self.since is None:
+            self.since, self.wait = time.monotonic(), RETRY_SECONDS
+            log.warning(f"{self.what}: Telegram not reachable ({_describe(e)}){note} - retrying, "
+                        f"less often while it goes on")
+        else:
+            self.wait = min(self.wait * 2, RETRY_MAX_SECONDS)
+        return max(self.wait, retry_after or 0)
+
+    def ok(self) -> None:
+        if self.health:
+            self.health.ok()
+        if self.since is not None:
+            log.info(f"{self.what}: Telegram reachable again after {(time.monotonic() - self.since) / 60:.1f} min")
+            self.since = None
+
+
+def _describe(e: BaseException) -> str:
+    return f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
 TYPING_EVERY_SECONDS = 4  # Telegram shows "typing..." for about 5 s
 
 
@@ -50,8 +99,9 @@ TYPING_EVERY_SECONDS = 4  # Telegram shows "typing..." for about 5 s
 
 async def send_outbox_message(path: Path, telegram: TelegramClient, settings: Settings) -> None:
     """Send one chat/outbox message (text + photo) and record it as sent
-    (chat.store.record_sent). On a Telegram error the file stays and is
-    retried next tick."""
+    (chat.store.record_sent). When Telegram cannot be reached this raises and
+    the file stays for the next try; a message Telegram refuses is sent
+    without its photo, else moved to outbox/failed/."""
     try:
         message = json.loads(path.read_text(encoding="utf-8"))
     except Exception as e:  # noqa: BLE001
@@ -64,30 +114,49 @@ async def send_outbox_message(path: Path, telegram: TelegramClient, settings: Se
         log.warning("outbox: %s photo not found: %s - sending text only", path.name, photo)
         photo = None
     try:
-        if photo is not None:
-            await telegram.send_photo(photo, caption=text or None)
-        elif text:
+        try:
+            if photo is not None:
+                await telegram.send_photo(photo, caption=text or None)
+            elif text:
+                await telegram.send_message(text)
+        except TelegramError as e:
+            if not (e.permanent and photo is not None and text):
+                raise
+            log.warning(f"outbox: {path.name} refused with its photo ({e}) - sending the text only")
+            photo = None
             await telegram.send_message(text)
     except TelegramError as e:
-        log.error("outbox: telegram send failed for %s: %s", path.name, e)
+        if not e.permanent:
+            raise
+        failed = path.parent / FAILED / path.name
+        failed.parent.mkdir(exist_ok=True)
+        path.replace(failed)
+        log.error(f"outbox: Telegram refused {path.name} ({e}) - moved to outbox/{FAILED}/")
         return
     chat_store.record_sent(settings.chat_dir, settings.timezone, str(settings.telegram_chat_id), path,
                            photo_sent=photo is not None)
     log.info("Outbox message sent: %s%s; added to chat history", path.name, " with photo" if photo else "")
 
 
-async def outbox_loop(telegram: TelegramClient, settings: Settings, stop: asyncio.Event) -> None:
+async def outbox_loop(telegram: TelegramClient, settings: Settings, stop: asyncio.Event,
+                      telegram_health: Optional[Dependency] = None) -> None:
     log.info("outbox: watching %s", settings.chat_dir / chat_store.OUTBOX)
+    outage = Outage("outbox", telegram_health)
     while not stop.is_set():
+        wait = OUTBOX_POLL_SECONDS
         try:
             for f in chat_store.queued_messages(settings.chat_dir):
                 if stop.is_set():
                     break
                 await send_outbox_message(f, telegram, settings)
+                outage.ok()
+        except (TelegramError, *TRANSIENT) as e:
+            waiting = len(chat_store.queued_messages(settings.chat_dir))
+            wait = outage.failed(e, f"; {waiting} message(s) waiting")
         except Exception:  # noqa: BLE001
             log.exception("outbox loop iteration failed")
         with suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(stop.wait(), timeout=OUTBOX_POLL_SECONDS)
+            await asyncio.wait_for(stop.wait(), timeout=wait)
 
 
 # ---------- incoming messages ----------
@@ -108,8 +177,8 @@ async def _reply(telegram: TelegramClient, text: str) -> None:
     try:
         await telegram.send_message(text)
         log.info(f"  Reply sent: {text}")
-    except TelegramError as e:
-        log.error(f"  Reply not sent: {e}")
+    except (TelegramError, *TRANSIENT) as e:
+        log.warning(f"  Reply not sent: {_describe(e)}")
 
 
 async def security_mode_command(settings: Settings, telegram: TelegramClient, command: str) -> None:
@@ -120,7 +189,9 @@ async def security_mode_command(settings: Settings, telegram: TelegramClient, co
     else:
         state = await asyncio.to_thread(security_mode.set_mode, settings, command, "telegram")
         log.info(f"  /{command} command - security mode set to {state.headline()}")
-    await _reply(telegram, f"Security mode: {state.headline()}")
+    scheduled = await asyncio.to_thread(security_mode.upcoming, settings)
+    await _reply(telegram, f"Security mode: {state.headline()}"
+                 + "".join(f"\nScheduled: {e.describe()}" for e in scheduled))
 
 
 async def handle_message(agent: ChatAgent, telegram: TelegramClient, chat_id: str, text: str) -> None:
@@ -137,16 +208,16 @@ async def handle_message(agent: ChatAgent, telegram: TelegramClient, chat_id: st
         try:
             await telegram.send_message(f"cleared {prior} turn(s)")
             log.info("  Confirmation sent")
-        except TelegramError as e:
-            log.error(f"  Confirmation not sent: {e}")
+        except (TelegramError, *TRANSIENT) as e:
+            log.warning(f"  Confirmation not sent: {_describe(e)}")
         return
 
     typing = asyncio.create_task(_keep_typing(telegram))
     t0 = time.perf_counter()
     try:
         reply = await agent.handle(chat_id, text)
-    except Exception as e:  # noqa: BLE001
-        log.exception(f"  Chat agent failed: {e} - error reply will be sent")
+    except Exception as e:  # noqa: BLE001 - the user gets the error as the reply: no separate alert
+        log.exception(f"  Chat agent failed: {e} - error reply will be sent", extra={"alert": False})
         reply = f"(agent error: {type(e).__name__}: {e})"
     finally:
         await _cancel(typing)
@@ -158,25 +229,36 @@ async def handle_message(agent: ChatAgent, telegram: TelegramClient, chat_id: st
     try:
         await telegram.send_message(reply)
         log.info(f"  Reply sent in {time.perf_counter() - t0:.1f}s total: {reply}")
-    except TelegramError as e:
-        log.error(f"  Reply not sent: {e}")
+    except (TelegramError, *TRANSIENT) as e:
+        log.warning(f"  Reply not sent: {_describe(e)}")
 
 
-async def poll_loop(agent: ChatAgent, telegram: TelegramClient, authorized: str, stop: asyncio.Event) -> None:
+async def poll_loop(agent: ChatAgent, telegram: TelegramClient, authorized: str, stop: asyncio.Event,
+                    health: Optional[Health] = None, telegram_health: Optional[Dependency] = None) -> None:
     offset: Optional[int] = None
+    outage = Outage("incoming messages", telegram_health)
     while not stop.is_set():
+        if health:
+            health.ok()  # a pass of the loop: the bot runs (Telegram's own state is telegram_health)
         try:
             updates = await telegram.get_updates(offset=offset, timeout=30)
+            outage.ok()
         except TelegramError as e:
-            log.error("getUpdates failed: %s", e)
-            await asyncio.sleep(RETRY_SECONDS)
+            if e.permanent or e.code == 409:  # bad token / chat; 409: another bot polls with this token
+                log.error(f"getUpdates failed: {e} - check TELEGRAM_BOT_TOKEN and that only one chat-bot runs")
+                if telegram_health:
+                    telegram_health.failed(f"refuses the bot: {e}")
+                await asyncio.sleep(RETRY_MAX_SECONDS)
+            else:
+                await asyncio.sleep(outage.failed(e))
             continue
-        except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
-            log.warning(f"Telegram unreachable, retrying in {RETRY_SECONDS}s: {e or type(e).__name__}")
-            await asyncio.sleep(RETRY_SECONDS)
+        except TRANSIENT as e:
+            await asyncio.sleep(outage.failed(e))
             continue
         except Exception as e:  # noqa: BLE001
             log.exception("unexpected getUpdates error: %s", e)
+            if health:
+                health.failed(f"unexpected error: {_describe(e)}")
             await asyncio.sleep(RETRY_SECONDS)
             continue
 
@@ -209,9 +291,10 @@ async def serve(settings: Settings) -> None:
         with suppress(NotImplementedError):  # Windows: Ctrl+C raises KeyboardInterrupt instead
             loop.add_signal_handler(sig, stop.set)
 
-    outbox = asyncio.create_task(outbox_loop(telegram, settings, stop))
+    health, telegram_health = Health(settings, PROGRAM), Dependency(settings, "telegram")
+    outbox = asyncio.create_task(outbox_loop(telegram, settings, stop, telegram_health))
     try:
-        await poll_loop(agent, telegram, authorized, stop)
+        await poll_loop(agent, telegram, authorized, stop, health, telegram_health)
     finally:
         stop.set()
         await _cancel(outbox)

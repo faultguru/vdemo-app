@@ -29,6 +29,36 @@ class StorageSettings(BaseSettings):
     chat_prefix: str = "chat"                          # memory, events-inbox/, outbox/, <date>/ day files
 
     timezone: str = "America/Los_Angeles"
+    # Service health (core.health, supervisor watchdog): Telegram is told once a service
+    # has been failing this long (0 = never), and again when it works again; the
+    # supervisor restarts fetch when it has not polled for HEALTH_STALE_MINUTES (0 = never)
+    # and tells Telegram when a service exits CRASH_ALERT_AFTER_RESTARTS times in a row
+    # without staying up.
+    health_alert_after_minutes: int = 15
+    health_stale_minutes: int = 15
+    crash_alert_after_restarts: int = 5
+    # Errors the services log are also sent to Telegram (core.alerts), the same kind
+    # of error at most once per ALERT_REPEAT_MINUTES.
+    alert_on_errors: bool = True
+    alert_repeat_minutes: int = 360
+    # Telegram is told when the storage disk has less free space than this (0 = never).
+    disk_min_free_gb: float = 5.0
+    # Tuning (.env.example documents each option):
+    control_start_wait_sec: int = 30
+    control_stop_wait_sec: int = 60
+    inbox_poll_sec: float = 1.0
+    inbox_retry_sec: float = 60.0
+    inbox_retry_max_sec: float = 3600.0
+    inbox_alert_after_failures: int = 5
+    inbox_unreadable_alert_sec: float = 120.0
+    alert_max_per_hour: int = 6
+    restart_min_sec: float = 2.0
+    restart_max_sec: float = 60.0
+    restart_stable_sec: float = 60.0
+    stop_timeout_sec: float = 20.0
+    settings_settle_sec: float = 2.0
+    watchdog_sec: float = 60.0
+    asleep_detect_sec: float = 30.0
 
     @property
     def storage_path(self) -> Path:

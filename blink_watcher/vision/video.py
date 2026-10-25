@@ -6,10 +6,13 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from blink_watcher.settings import get_settings
+
+_settings = get_settings()
 
 DEFAULT_FPS = 25.0      # when the container reports none (broken headers)
-JPEG_MAX_SIDE = 1600    # thumbnails
-JPEG_QUALITY = 92
+JPEG_MAX_SIDE = _settings.thumbnail_max_side  # thumbnails
+JPEG_QUALITY = _settings.thumbnail_quality
 
 
 class VideoError(RuntimeError):

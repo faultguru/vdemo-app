@@ -33,16 +33,19 @@ from blink_watcher.chat.agent import ChatAgent
 from blink_watcher.chat.prompts import live_block
 from blink_watcher.chat.tools import EventTools
 from blink_watcher.core.images import ImageError, fit_jpeg
+from blink_watcher.settings import get_settings
 from blink_watcher.webui.context import DATE, WebContext, context
 from blink_watcher.webui.routes.live import LIVE
+
+_settings = get_settings()
 
 log = logging.getLogger(__name__)
 
 CHAT_ID = "webui"
-TRANSCRIPT_MAX = 100                     # console messages kept in memory for page reloads
+TRANSCRIPT_MAX = _settings.webui_chat_transcript_max  # console messages kept in memory for page reloads
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 VIDEO_SUFFIXES = {".mp4", ".webm", ".mov"}
-VIDEO_FRAMES = 4                         # frames of an uploaded video shown to the agent
+VIDEO_FRAMES = _settings.webui_chat_video_frames      # frames of an uploaded video shown to the agent
 
 routes = web.RouteTableDef()
 
@@ -103,7 +106,7 @@ def _video_frames(data: bytes, suffix: str) -> list[Part]:
     import cv2
 
     parts: list[Part] = []
-    with tempfile.TemporaryDirectory(prefix="webui-upload-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="webui-upload-", ignore_cleanup_errors=True) as tmp:
         path = Path(tmp) / f"upload{suffix}"
         path.write_bytes(data)
         cap = cv2.VideoCapture(str(path))

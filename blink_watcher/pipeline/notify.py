@@ -23,6 +23,10 @@ handles up to EVENT_PROCESS_LIMIT of them (0 = all). For each event:
      close    — once a message is queued, the one-off requests of the day
                 notes it fulfils ("alert-on:") become "alert-done:", so the
                 same request does not alert again.
+     auto-away — when the answer says a household vehicle (AUTO_AWAY; the
+                cars in long-term memory) drove off while the mode is HOME, the mode becomes AWAY; when
+                it came back to an auto-away, HOME again. Telegram is told of
+                each change (a message of its own, sent or skipped event alike).
   3. queue    — the decision is stored with the event in the daily event
                 list ("notification": {decision, tone, message, skip_reason,
                 model, composed_at, message_file, sent_at}); only if a
@@ -58,8 +62,10 @@ from typing import Optional
 from blink_watcher.chat import store as chat_store
 from blink_watcher.chat.agent import ChatAgent, Notification
 from blink_watcher.chat.tools import EventTools
-from blink_watcher.core.daemon import run_daemon
-from blink_watcher.core.logs import setup_logging
+from blink_watcher.core.daemon import run_daemon, unreadable
+from blink_watcher.core import security_mode
+from blink_watcher.core.health import Health, tell
+from blink_watcher.core.logs import log_clip, setup_logging
 from blink_watcher.core.storage import CHAT, TEMP_VIDEOS, Storage, make_storage
 from blink_watcher.describe import RESULT_FILE
 from blink_watcher.settings import Settings, load_settings
@@ -135,6 +141,10 @@ def decide(agent: ChatAgent, areas: Areas, event: Event) -> Optional[Notificatio
     if not (summary.get("description") or "").strip():
         log.info("  [2/4] Notification skipped: event has no description")
         return None
+    stale = too_old(agent.settings, event)
+    if stale:
+        log.info(f"  [2/4] Notification skipped: {stale}")
+        return Notification(False, None, "", stale, f"SKIP: {stale}")
     log.info(f"  [2/4] Chat agent deciding on a notification ({agent.model}, {agent.llm.name})...")
     work_dir = areas.temp.local_path(event.work_key)
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -181,6 +191,21 @@ def link_subject(areas: Areas, event: Event, notification: Optional[Notification
         log.info(f"        Same subject as {len(same_as)} earlier event(s) ({cams}) - track {track_id}")
     else:
         log.info(f"        New subject: {notification.subject or '(no signature)'} - track {track_id}")
+
+
+def too_old(settings, event: Event) -> Optional[str]:
+    """Why the event is too old to alert (NOTIFY_MAX_AGE_MINUTES), else None.
+    Old news is not sent as if it were happening now: a catch-up after an
+    outage, a long backlog."""
+    limit = settings.notify_max_age_minutes
+    try:
+        at = datetime.fromisoformat(event.body.get("recorded_at") or "")
+    except ValueError:
+        return None
+    age = (datetime.now(timezone.utc) - at).total_seconds() / 60
+    if limit <= 0 or age <= limit:
+        return None
+    return f"recorded {age / 60:.1f} h ago, older than NOTIFY_MAX_AGE_MINUTES={limit} - recorded, not alerted"
 
 
 def notification_record(notification: Optional[Notification]) -> dict:
@@ -239,6 +264,50 @@ def close_requests(agent: ChatAgent, event: Event, notification: Optional[Notifi
         log.warning(f"        No open alert-on request matched: {'; '.join(notification.fulfills)}")
 
 
+def auto_away(settings, event: Event, notification: Optional[Notification]) -> None:
+    """Step 3c: a household vehicle drove off (HOME -> AWAY) or came back
+    (AWAY -> HOME, whoever set it; VACATION is left alone). A mode set after
+    the event is left alone."""
+    if not settings.auto_away:
+        return
+    move = notification.household_vehicle if notification else "none"
+    if move not in ("departed", "arrived"):
+        log.info("        Auto-away: no household car leaving or arriving")
+        return
+    vehicle = "household car"
+    try:
+        at = datetime.fromisoformat(event.body.get("recorded_at") or "")
+    except ValueError:
+        return
+    camera = (event.body.get("camera") or "camera").strip()
+    state = security_mode.current(settings)
+    when = f"{at:%H:%M}"
+    if move == "departed":
+        if state.mode != "home":
+            log.info(f"        Auto-away: {vehicle} left at {when} - mode is {state.label.upper()}, not HOME: unchanged")
+            return
+        if state.since and datetime.fromisoformat(state.since) > at:
+            log.info(f"        Auto-away: {vehicle} left at {when} - HOME was set after that: unchanged")
+            return
+        new = security_mode.set_mode(settings, "away", security_mode.BY_AUTO_AWAY,
+                                     note=f"auto-away: {vehicle} left at {when}")
+        tell(settings, "MODE_AUTO_AWAY", f"Auto-away: your car left at {when} ({camera}), so the security "
+                                         f"mode is now AWAY. It goes back to HOME when the car returns.")
+    else:
+        if state.mode != "away":
+            log.info(f"        Auto-away: {vehicle} arrived at {when} - mode is {state.label.upper()}, "
+                     f"not AWAY: unchanged")
+            return
+        if state.since and datetime.fromisoformat(state.since) > at:
+            log.info(f"        Auto-away: {vehicle} arrived at {when} - AWAY was set after that: unchanged")
+            return
+        new = security_mode.set_mode(settings, "home", security_mode.BY_AUTO_AWAY,
+                                     note=f"{vehicle} back at {when}")
+        tell(settings, "MODE_AUTO_HOME", f"Welcome back: your car arrived at {when} ({camera}), so the "
+                                         f"security mode is {new.headline()}.")
+    log.info(f"        Auto-away: {vehicle} {move} at {when} - security mode set to {new.headline()}")
+
+
 def finish(areas: Areas, event: Event, opts: Options, t_event: float) -> None:
     """Step 4: remove the inbox file and work folder (both kept with --preserve)."""
     inbox_file = f"{INBOX}/{PurePosixPath(event.inbox_key).name}"
@@ -262,6 +331,7 @@ def process_event(agent: ChatAgent, areas: Areas, event: Event, opts: Options) -
     queued = queue_message(areas, event, notification)
     if queued:
         close_requests(agent, event, notification)
+    auto_away(agent.settings, event, notification)
     finish(areas, event, opts, t_event)
     return queued
 
@@ -269,9 +339,17 @@ def process_event(agent: ChatAgent, areas: Areas, event: Event, opts: Options) -
 # ---------- Run ----------
 
 def read_inbox(chat: Storage) -> list[Event]:
-    """Queued events, oldest recording first."""
-    queued = [Event(key, chat.read_json(key)) for key in chat.list(f"{INBOX}/") if key.endswith(EVENT_SUFFIX)]
-    return sorted(queued, key=lambda e: (e.event_id, e.inbox_key))
+    """Queued events: today's first, then earlier days' (a catch-up), each oldest recording first."""
+    queued = []
+    for key in chat.list(f"{INBOX}/"):
+        if not key.endswith(EVENT_SUFFIX):
+            continue
+        try:
+            queued.append(Event(key, chat.read_json(key)))
+        except (OSError, ValueError) as e:
+            unreadable(log, key, e)
+    today = datetime.now().astimezone().strftime("%Y-%m-%d")
+    return sorted(queued, key=lambda e: (not e.event_id.startswith(today), e.event_id, e.inbox_key))
 
 
 def print_header(agent: ChatAgent, areas: Areas, opts: Options, waiting: int, total: int, log_file: Path) -> None:
@@ -295,19 +373,26 @@ def run(settings: Settings, opts: Options, log_file: Path) -> int:
 
     if opts.daemon:
         print_header(agent, areas, opts, len(next_batch(set())), len(queued), log_file)
-        return run_daemon(log, "events", next_batch, lambda batch: process_batch(agent, areas, batch, opts))
+        health = Health(settings, PROGRAM)
+        return run_daemon(log, "events", next_batch, lambda batch: process_batch(agent, areas, batch, opts, health),
+                          health)
     batch = next_batch(set())
     print_header(agent, areas, opts, len(batch), len(queued), log_file)
     return 1 if process_batch(agent, areas, batch, opts) else 0
 
 
-def process_batch(agent: ChatAgent, areas: Areas, batch: list[Event], opts: Options) -> list[str]:
-    """Process `batch`; returns the inbox keys of the events that failed."""
+def process_batch(agent: ChatAgent, areas: Areas, batch: list[Event], opts: Options,
+                  health: Optional[Health] = None) -> dict[str, str]:
+    """Process `batch`; returns the events that failed: inbox key -> the error.
+    `health` gets a heartbeat per event (a long batch is not a stuck service)."""
     t_run = time.perf_counter()
     sent = skipped = 0
-    failed: list[str] = []
+    failed: dict[str, str] = {}  # inbox key -> the error
     for i, event in enumerate(batch, 1):
+        if health:
+            health.beat()
         summary = (event.body.get("summary") or {}).get("description") or "(no description)"
+        log_clip(event.body.get("camera"), event.body.get("recorded_at"))
         log.info(f"[{i}/{len(batch)}] Processing event {event.event_id} "
                  f"({PurePosixPath(event.inbox_key).name})")
         log.info(f"  Recorded at: {event.body.get('recorded_at')}; description: {summary}")
@@ -316,9 +401,11 @@ def process_batch(agent: ChatAgent, areas: Areas, batch: list[Event], opts: Opti
                 sent += 1
             else:
                 skipped += 1
-        except Exception as e:  # noqa: BLE001
-            failed.append(event.inbox_key)
-            log.exception(f"  Event processing failed: {e} - inbox file retained for the next run")
+        except Exception as e:  # noqa: BLE001 - retried (core.daemon: later each time; an error after a few)
+            failed[event.inbox_key] = f"{type(e).__name__}: {e}"
+            log.warning(f"  Event processing failed: {type(e).__name__}: {e} - inbox file retained for the next run",
+                        exc_info=True)
+    log_clip(None)
 
     remaining = sum(1 for _ in read_inbox(areas.chat))
     log.info(f"Run completed in {time.perf_counter() - t_run:.1f}s: {sent} message(s) queued, "

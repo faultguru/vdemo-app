@@ -8,9 +8,12 @@ from blink_watcher.chat import store as chat_store
 from blink_watcher.providers.base import Camera
 from blink_watcher.providers.catalog import load_cameras
 from blink_watcher.settings import Settings
+from blink_watcher.settings import get_settings
 from blink_watcher.settings.cameras import camera_key
 
-FALLBACK_DAYS = 14
+_settings = get_settings()
+
+FALLBACK_DAYS = _settings.webui_camera_fallback_days
 
 
 def _fallback(settings: Settings) -> list[Camera]:

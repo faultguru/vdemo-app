@@ -23,11 +23,14 @@ from typing import Optional
 
 from blink_watcher.ai.base import ImagePart, LLMClient, LLMRequest, LLMResponse, LLMThrottled, TextPart, Usage
 from blink_watcher.ai.transient import is_transient, one_line
+from blink_watcher.settings import get_settings
+
+_settings = get_settings()
 
 REQUEST_JSONL = "llm.request.jsonl"
 REQUEST_ARGS = "llm.request.args.json"
 REQUEST_SYSTEM = "llm.system.txt"
-TIMEOUT_SEC = 900
+TIMEOUT_SEC = _settings.claude_cli_timeout_sec
 
 
 def content_blocks(request: LLMRequest) -> list[dict]:
@@ -73,11 +76,11 @@ class ClaudeCliClient(LLMClient):
         exe = shutil.which("claude")
         if not exe:
             raise SystemExit("`claude` CLI not found on PATH")
-        with tempfile.TemporaryDirectory(prefix="llm-") as tmp:
+        with tempfile.TemporaryDirectory(prefix="llm-", ignore_cleanup_errors=True) as tmp:
             folder = request_dir or Path(tmp)  # the CLI reads stdin and the system prompt from files
             files = self.write_request(request, folder)
             args = json.loads((folder / REQUEST_ARGS).read_text(encoding="utf-8"))
-            with tempfile.TemporaryDirectory(prefix="llm-cwd-") as cwd, \
+            with tempfile.TemporaryDirectory(prefix="llm-cwd-", ignore_cleanup_errors=True) as cwd, \
                     open(folder / REQUEST_JSONL, encoding="utf-8") as stdin:
                 try:
                     proc = subprocess.run([exe, *args], stdin=stdin, capture_output=True, text=True,

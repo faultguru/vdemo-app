@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# This machine's app-monitor config (docs/faultguru.sample.json is the sample)
+.faultguru
+
 # Editor / tool local state
 .claude/
 .idea/

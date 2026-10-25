@@ -30,6 +30,9 @@ from pathlib import Path, PurePosixPath
 from threading import Lock
 from typing import Optional
 from zoneinfo import ZoneInfo
+from blink_watcher.settings import get_settings
+
+_settings = get_settings()
 
 log = logging.getLogger(__name__)
 
@@ -42,7 +45,7 @@ OUTBOX = "outbox"
 EVENTS_INBOX = "events-inbox"
 MESSAGE_SUFFIX = ".message.json"
 
-HISTORY_WINDOW = 10
+HISTORY_WINDOW = _settings.chat_history_window
 _DATE_DIR = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
@@ -152,7 +155,7 @@ def update_event(chat_dir: Path, event_id: str, **fields) -> None:
 
 # ---------- media-offer cooldown ----------
 
-OFFER_COOLDOWN_SECONDS = 3600  # only invite the user to request media once per hour
+OFFER_COOLDOWN_SECONDS = _settings.chat_media_offer_cooldown_sec  # only invite the user to request media once per hour
 
 
 def should_offer_media(chat_dir: Path) -> bool:

@@ -67,6 +67,8 @@ def system_prompt(base: str, memory: Memory, day_notes: Optional[DayNotes], tz_n
         return f"{base}\n\n{now_block}\n## Current memory\n{body}\n"
     active_day = active_day or now.strftime("%Y-%m-%d")
     notes = day_notes.read(active_day) or "(empty)"
+    coming = day_notes.upcoming(max(active_day, now.strftime("%Y-%m-%d")))
+    upcoming = "".join(f"\n### {date} ({_weekday(date)})\n{text}\n" for date, text in coming)
     return (
         f"{base}\n\n{now_block}\n"
         f"## Current memory\n{body}\n\n"
@@ -75,7 +77,14 @@ def system_prompt(base: str, memory: Memory, day_notes: Optional[DayNotes], tz_n
         f"on disk. Any `note_today` / `clear_today` calls you make also "
         f"target this same day automatically.\n"
         f"{notes}\n"
+        + (f"\n## Upcoming day notes\nNotes already filed for coming days "
+           f"(`note_for_date` / `clear_for_date`); they apply on their day.\n{upcoming}" if coming else "")
     )
+
+
+def _weekday(date: str) -> str:
+    from datetime import datetime
+    return datetime.strptime(date, "%Y-%m-%d").strftime("%A")
 
 
 def events_block(tools: EventTools, day: Optional[str], exclude: Optional[str] = None,

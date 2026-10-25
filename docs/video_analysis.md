@@ -141,10 +141,13 @@ Formats: [data_formats.md](data_formats.md).
   own person detection), `PROCESS_LIMIT`, `YOLO_REQUIRED_CLASSES`,
   `YOLO_DEVICE`, `DESCRIBER_MODEL`, `DESCRIBER_EFFORT`, `LLM_RETRY_SLEEP_SEC`,
   `LLM_MAX_RETRIES`.
-- Thresholds are constants at the top of each `vision/` module (triage
-  `TRIAGE_*`, motion `MIN_*_AREA_RATIO` / `MERGE_GAP_SEC` / ..., YOLO
-  `YOLO_CONF_THRESHOLD` / `MIN_SHIFT_RATIO`, tracks `SCAN_FPS` /
-  `PERSON_MOVE_RATIO`, sampling `BASELINE_FPS` / `BURST_FPS` / `MAX_FRAMES`,
-  trim `TRIM_PAD_SEC`), each with a comment on what it guards against.
+- Thresholds are settings too, in the "Video analysis" group of `.env.example`
+  (advanced on the configuration page; `settings/vision.py`): the quick check
+  `TRIAGE_*`, motion `MOTION_*`, YOLO `YOLO_CONF_THRESHOLD` /
+  `YOLO_MOTION_OVERLAP` / `YOLO_MIN_SHIFT_RATIO`, tracking `TRACK_*`, frames
+  for the AI `SAMPLE_*` and `BEND_*`, trimming `TRIM_*`, thumbnails
+  `THUMBNAIL_*`. Each `vision/` module reads them into its constants at the top
+  (e.g. `motion.MIN_SEGMENT_SEC` = `MOTION_MIN_SEGMENT_SEC`), each with a
+  comment on what it guards against; a change applies when process restarts.
 - `python -m blink_watcher frames <clip.mp4> -o <folder>` shows which frames a
   clip would send (and the trim) without calling the LLM.

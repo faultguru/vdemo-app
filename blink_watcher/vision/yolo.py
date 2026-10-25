@@ -18,14 +18,16 @@ from blink_watcher.settings import get_settings
 from blink_watcher.vision.hwtrace import trace, traced
 from blink_watcher.vision.motion import MotionSegment
 
+_settings = get_settings()
+
 log = logging.getLogger(__name__)
 
 YOLO_MODEL_NAME = "yolov8s.pt"  # small variant - ~22MB, more accurate than nano
-YOLO_CONF_THRESHOLD = 0.20      # min confidence of a detection in the motion check
+YOLO_CONF_THRESHOLD = _settings.yolo_conf_threshold  # min confidence of a detection in the motion check
 YOLO_ONNX_IMGSZ = (384, 640)    # directml: static ONNX input (h, w) - the 16:9 letterbox PyTorch uses for 1080p at 640
 YOLO_ONNX_BATCH = 1             # directml: static ONNX batch size
-MOTION_OVERLAP = 0.2            # a detection counts if this fraction of its box lies in the motion bbox
-MIN_SHIFT_RATIO = 0.03          # ...and its center moves this fraction of the frame's long side across keyframes
+MOTION_OVERLAP = _settings.yolo_motion_overlap       # a detection counts if this fraction of its box lies in the motion bbox
+MIN_SHIFT_RATIO = _settings.yolo_min_shift_ratio     # ...and its center moves this fraction of the frame's long side across keyframes
 # COCO classes that can plausibly move in a residential scene. Everything else
 # (tv, chair, potted plant, bench, ...) is static scenery, dropped even when
 # YOLO lands a confident box on the motion.

@@ -6,7 +6,9 @@ request into its own wire format and handles its own credentials.
 
 Retrying is shared: a provider raises LLMThrottled for a transient failure
 (rate or usage limit, overload, 5xx, timeout, dropped connection) and
-LLMClient.ask() waits and tries again, per the RetryPolicy.
+LLMClient.ask() waits and tries again, per the RetryPolicy. Each request's
+outcome is reported to `health` (the ai dependency, core.health) when set:
+failed once it gives up, ok once it is answered.
 """
 from __future__ import annotations
 
@@ -115,6 +117,7 @@ class LLMClient(ABC):
     """A provider. Subclasses implement _send (one attempt)."""
 
     name: str
+    health = None  # core.health.Dependency: set by make_llm()
 
     def __init__(self, retry: RetryPolicy = RetryPolicy()):
         self.retry = retry
@@ -132,6 +135,18 @@ class LLMClient(ABC):
     def ask(self, request: LLMRequest, request_dir: Optional[Path] = None,
             progress: Optional[Progress] = None) -> LLMResponse:
         """Send the request, retrying throttled attempts. Blocking."""
+        try:
+            response = self._ask(request, request_dir, progress)
+        except Exception as e:
+            if self.health:
+                self.health.failed(f"{type(e).__name__}: {e}" if str(e) else type(e).__name__)
+            raise
+        if self.health:
+            self.health.ok()
+        return response
+
+    def _ask(self, request: LLMRequest, request_dir: Optional[Path],
+             progress: Optional[Progress]) -> LLMResponse:
         progress = progress or (lambda msg, level=logging.INFO: log.log(level, msg))
         if request_dir:
             request_dir.mkdir(parents=True, exist_ok=True)

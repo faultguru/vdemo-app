@@ -3,7 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sentinel Configuration</title>
+<title>Watchtower Configuration</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/logo.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
@@ -36,6 +38,8 @@ header h1 { margin: 0; font: 900 18px var(--head); letter-spacing: .28em; color:
 header h1 small { display: block; font: 600 10.5px var(--mono); letter-spacing: .2em; color: var(--dim); margin-top: 3px; text-shadow: none; }
 .back { color: var(--cyan); text-decoration: none; font: 700 11px var(--head); letter-spacing: .18em; border: 1px solid var(--line-strong); padding: 8px 12px; }
 .back:hover { box-shadow: var(--glow-cyan); color: #fff; }
+.back { display: inline-flex; align-items: center; gap: 8px; }
+.back img { width: 18px; height: 18px; }
 .seg { display: flex; border: 1px solid var(--line-strong); }
 .seg button { cursor: pointer; border: 0; background: transparent; color: var(--dim); font: 700 11px var(--head); letter-spacing: .18em; padding: 9px 14px; }
 .seg button.on { color: #fff; background: rgba(0,229,255,.16); box-shadow: inset 0 0 0 1px var(--cyan); }
@@ -155,7 +159,7 @@ nav.groups a .n.mod { color: var(--amber); }
 <div class="backdrop"></div>
 <div class="wrap">
   <header class="panel cut">
-    <a class="back" href="/">◂ CONSOLE</a>
+    <a class="back" href="/">◂ <img src="/logo.svg" alt="">WATCHTOWER</a>
     <h1>SYSTEM CONFIGURATION<small id="envfile">.env</small></h1>
     <div class="seg" id="mode"><button data-m="normal" class="on">NORMAL</button><button data-m="advanced" class="adv">ADVANCED</button></div>
     <input type="search" id="q" placeholder="Search options and help…">

@@ -35,13 +35,57 @@ failing). Ctrl+C stops them in turn (Windows: CTRL_BREAK to the child's own
 process group, which `cli` turns into KeyboardInterrupt; POSIX: SIGINT) and
 kills what has not stopped after 20 s.
 
+### When something keeps failing
+
+A failure that only reaches a log file goes unnoticed (the Blink login once
+broke overnight and nothing was downloaded for ten hours), so:
+
+- when fetch --daemon starts it catches up the days since the last stored
+  clip (`FETCH_CATCHUP_DAYS`, 7), one per poll after today's; the processor
+  and the notifier take today's clips first, and the notifier doesn't alert
+  events older than `NOTIFY_MAX_AGE_MINUTES`;
+
+- fetch, process, notify and the chat-bot report every pass to `core.health`
+  (`state/health/<name>.json`), and so do the outside services they use:
+  blink (fetch's polls), telegram (the chat-bot's), ai (every LLM call, from
+  any program). A service, or Blink, failing for
+  `HEALTH_ALERT_AFTER_MINUTES` queues a Telegram message, and another when it
+  works again; the console shows a red banner meanwhile. `GET /api/health`
+  lists every module as OK or DOWN (200 when all are OK, else 503), for
+  outside monitoring too.
+- fetch backs off while polls fail (up to `FETCH_RETRY_MAX_SECONDS`) and
+  reconnects to the provider every `FETCH_RECONNECT_AFTER_FAILURES` failures.
+  A login that needs a 2FA PIN is not retried (each try emails a new PIN): it
+  asks for `BLINK_2FA_CODE` on Telegram at once.
+- the supervisor's watchdog restarts fetch when its health file is older than
+  `HEALTH_STALE_MINUTES` (stuck), and tells Telegram when a service exits
+  `CRASH_ALERT_AFTER_RESTARTS` times in a row without staying up.
+- the Blink provider logs an error when blinkpy is older than the version
+  known to work with Blink's login (`providers/blink/auth.MIN_BLINKPY`).
+- every ERROR a service started by `run` logs is also sent to Telegram
+  (`core.alerts`, `ALERT_ON_ERRORS`): the same kind of error at most once per
+  `ALERT_REPEAT_MINUTES` (repeats are counted in the next message), at most 6
+  an hour. So ERROR is kept for what needs a look; a failure that is retried
+  on its own is a WARNING (the health alerts above cover it going on).
+- a clip or event that keeps failing is retried later each time (1 min,
+  doubling to 1 h) and becomes an error after 5 failures in a row; it does
+  not count as the service failing. An inbox file that can't be read is
+  skipped, and an error once it stays unreadable for 2 min.
+- Telegram unreachable: the chat-bot logs one warning, retries with a growing
+  wait (up to 5 min) and keeps the outbox; a message Telegram refuses is sent
+  without its photo, else moved to `chat/outbox/failed/` (an error).
+- fetch logs an error when the storage disk has less than `DISK_MIN_FREE_GB`
+  free.
+- after the computer slept, the watchdog gives the services
+  `HEALTH_STALE_MINUTES` again before it calls one stuck.
+
 ## Packages
 
 | package | role |
 |---------|------|
 | `cli.py`, `__main__.py` | `python -m blink_watcher <command>`: command -> module `main(argv)`, imported only when that command runs |
 | `supervisor.py` | the `run` command (above) |
-| `core/` | shared plumbing: `paths` (project folders, `.env`), `runtime` (`state/`, `logs/`, `models/` under STORAGE_ROOT), `storage` (storage areas, key layout), `logs` (`setup_logging`), `daemon` (inbox polling loop), `images` (`fit_jpeg`), `prompts` (`load_prompt`), `filters` (the per-camera detection filters: always / person / person_or_vehicle), `security_mode` (NORMAL / HOME / AWAY / VACATION: state, auto-end, prompt block) |
+| `core/` | shared plumbing: `paths` (project folders, `.env`), `runtime` (`state/`, `logs/`, `models/` under STORAGE_ROOT), `storage` (storage areas, key layout), `logs` (`setup_logging`), `daemon` (inbox polling loop), `health` (service health, failure alerts), `alerts` (errors to Telegram), `images` (`fit_jpeg`), `prompts` (`load_prompt`), `filters` (the per-camera detection filters: always / person / person_or_vehicle), `security_mode` (NORMAL / HOME / AWAY / VACATION: state, timed end, schedule, prompt block) |
 | `settings/` | `Settings`, composed of one section per area (see below); `document` = the configuration page's model of `.env.example` / `.env` |
 | `providers/` | camera providers behind `CameraProvider` (`base`), `make_provider()`, the camera catalog (`catalog`); `blink/` = the Blink provider (blinkpy) |
 | `ai/` | LLM providers behind `LLMClient` (`base`), `make_llm()`; `claude_cli/`, `claude_api/`; `gemini/` = a reference whole-video describer, not wired in |
@@ -189,12 +233,21 @@ between them in `pipeline.process`).
 `settings.Settings` is a pydantic-settings class composed of sections, each
 next to the code that owns it: `storage` (STORAGE_ROOT, storage areas, time
 zone), `cameras` (CAMERA_PROVIDER, CAMERAS, filters), `processing` (video
-processor, YOLO), `ai` (LLM provider, describer model), `chat` (chat agent,
-Telegram), `webui`, `stitch`, and each camera provider's own section
+processor, YOLO), `vision` (the video analysis thresholds), `ai` (LLM
+provider, describer model), `chat` (chat agent, Telegram), `webui`, `stitch`,
+`security`, and each camera provider's own section
 (`providers/blink/settings.py`). Values come from the environment, then
 `.env` at the project root (`core.paths.ENV_FILE`), then the defaults.
 Services call `load_settings()` once; library code that needs a value without
 a `Settings` at hand uses `get_settings()` (cached).
+
+No limit or threshold is hardcoded: timings, retries, sizes and thresholds
+are settings with a default (most of them advanced). A module that uses one
+in many places reads it once into a module constant
+(`MAX_FRAMES = _settings.sample_max_frames`), so other modules can still
+import the name; the supervisor falls back to the defaults when `.env` can't
+be loaded. What stays in code are facts, not choices: Telegram's message
+length limits, file format versions, the YOLO model's input shape.
 
 `.env.example` documents every key — groups, help text, which services need a
 restart, and tags for the configuration page (`settings/document.py`, see
@@ -225,3 +278,10 @@ reconstructed from a folder name.
 INFO, every other module only warnings unless `-v`. Also in `logs/`:
 `chat_prompts.log` (every chat agent request in full), `run.log` (the
 supervisor), `hw_trace.log` / `hw_monitor.log` (GPU diagnostics).
+
+Levels: INFO for what happens, WARNING for a problem that is handled or
+retried on its own, ERROR for one that needs the user (sent to Telegram, see
+"When something keeps failing"). A traceback is logged for unexpected errors;
+a retried failure logs it only the first time that kind of error is seen.
+asyncio's harmless "connection lost" tracebacks (Windows, a client closing
+its connection) are dropped.

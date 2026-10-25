@@ -31,13 +31,16 @@ from blink_watcher.live.snapshots import SnapshotStore
 from blink_watcher.live.stream import LiveError, LiveStream
 from blink_watcher.providers import CameraProvider, catalog, make_provider
 from blink_watcher.settings import Settings
+from blink_watcher.settings import get_settings
+
+_settings = get_settings()
 
 log = logging.getLogger(__name__)
 
-HEARTBEAT_SEC = 15.0        # snapshots continue this long after the last status() call
-ROUND_PAUSE_SEC = 1.0       # pause between snapshot rounds
-ERROR_PAUSE_SEC = 10.0      # pause after a failed round
-PRUNE_EVERY_SEC = 600.0
+HEARTBEAT_SEC = _settings.live_viewer_timeout_sec  # snapshots continue this long after the last status() call
+ROUND_PAUSE_SEC = _settings.live_round_pause_sec   # pause between snapshot rounds
+ERROR_PAUSE_SEC = _settings.live_error_pause_sec   # pause after a failed round
+PRUNE_EVERY_SEC = _settings.live_prune_every_sec
 
 
 class LiveMonitor:

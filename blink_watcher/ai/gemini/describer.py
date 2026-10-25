@@ -33,17 +33,20 @@ from blink_watcher.ai.base import Usage
 from blink_watcher.core.prompts import load_prompt
 from blink_watcher.describe.request import SYSTEM_PROMPT, user_prompt
 from blink_watcher.describe.schema import VideoAnalysis
+from blink_watcher.settings import get_settings
 from blink_watcher.vision.ffmpeg import trim_video
 from blink_watcher.vision.motion import MotionSegment
+
+_settings = get_settings()
 
 log = logging.getLogger(__name__)
 
 INPUT_MODE_PROMPT = "describe_gemini.input_mode.txt"
-TRIM_PAD_SEC = 0.5         # keep this much around the motion span
-MIN_TRIM_SAVING_SEC = 1.0  # send the whole clip when the cut would save less
-UPLOAD_TIMEOUT_SEC = 120
-PERSON_FPS = 5.0           # video sampling rate when a person is in the clip (hand state, bends)
-DEFAULT_FPS = 1.0          # otherwise (vehicles, animals)
+TRIM_PAD_SEC = _settings.gemini_trim_pad_sec                # keep this much around the motion span
+MIN_TRIM_SAVING_SEC = _settings.gemini_min_trim_saving_sec  # send the whole clip when the cut would save less
+UPLOAD_TIMEOUT_SEC = _settings.gemini_upload_timeout_sec
+PERSON_FPS = _settings.gemini_person_fps                    # video sampling rate when a person is in the clip (hand state, bends)
+DEFAULT_FPS = _settings.gemini_default_fps                  # otherwise (vehicles, animals)
 
 
 class GeminiVideoDescriber:
@@ -62,7 +65,7 @@ class GeminiVideoDescriber:
         from vision.check."""
         if not segments:
             raise ValueError("nothing to describe: no motion segments")
-        with tempfile.TemporaryDirectory(prefix="gemini-") as tmp:
+        with tempfile.TemporaryDirectory(prefix="gemini-", ignore_cleanup_errors=True) as tmp:
             clip, offset, duration = self._cut(video_path, segments, info, Path(tmp))
             yolo = Counter(d["class"] for s in segments for d in s.detections)
             prompt = user_prompt(

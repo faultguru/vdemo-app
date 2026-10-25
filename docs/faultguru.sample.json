@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "name": "Faultguru Watchtower",
+  "root": "/path/to/vdemo",
+  "url": "http://127.0.0.1:9090",
+  "start": "vdemo.bat start",
+  "stop": "vdemo.bat stop",
+  "restart": "vdemo.bat restart",
+  "autostart": true,
+  "restart_policy": {
+    "policy": "on-failure",
+    "max_restarts": 3,
+    "window_sec": 600
+  },
+  "health": {
+    "url": "http://127.0.0.1:9090/api/health",
+    "expect_status": "200",
+    "expect_json": { "status": "OK" }
+  },
+  "modules": {
+    "list": "modules",
+    "name": "name",
+    "status": "status"
+  },
+  "logs": [
+    { "path": "data-storage/logs/run.log", "errors": [" ERROR ", " CRITICAL "] },
+    { "path": "data-storage/logs/fetch.log", "errors": [" ERROR ", " CRITICAL "] },
+    { "path": "data-storage/logs/process.log", "errors": [" ERROR ", " CRITICAL "] },
+    { "path": "data-storage/logs/notify.log", "errors": [" ERROR ", " CRITICAL "] },
+    { "path": "data-storage/logs/chat-bot.log", "errors": [" ERROR ", " CRITICAL "] },
+    { "path": "data-storage/logs/webui.log", "errors": [" ERROR ", " CRITICAL "] }
+  ]
+}

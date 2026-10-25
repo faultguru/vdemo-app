@@ -1,7 +1,8 @@
-# blink-watcher
+# Faultguru Watchtower
 
-A home-security assistant for cloud cameras. It downloads every motion clip
-from the camera provider (Blink today), throws away the ones where nothing
+Faultguru Watchtower (Python package `blink_watcher`) is a home-security
+assistant for cloud cameras. It downloads every motion clip from the camera
+provider (Blink today), throws away the ones where nothing
 happens using plain computer vision (OpenCV motion, YOLO person check), has an
 LLM describe the ones that matter from a handful of key frames, and lets a
 chat agent decide which events are worth a Telegram message. You can talk to
@@ -52,7 +53,7 @@ signed in (`claude` once) for the default LLM provider, a Blink account and a
 Telegram bot (from @BotFather).
 
 ```bash
-pip install -e .                    # extras: .[claude-api] .[gemini] .[directml] .[diagnostics]
+pip install -e .                    # extras: .[claude-api] .[gemini] .[directml]
 cp .env.example .env                # then set at least BLINK_USERNAME, BLINK_PASSWORD, CAMERAS,
                                     # TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 python -m blink_watcher fetch --list    # first Blink login (asks for the 2FA PIN Blink e-mails:
@@ -60,11 +61,27 @@ python -m blink_watcher fetch --list    # first Blink login (asks for the 2FA PI
 python -m blink_watcher run         # every service; Ctrl+C stops them all
 ```
 
-`run.ps1` / `run.sh` do the same from the project folder (using `.venv` when
-there is one). The console is at http://127.0.0.1:9090; its configuration page
+`run.bat` (double-click on Windows) / `run.ps1` / `run.sh` do the same from the
+project folder (using `.venv` when there is one). The console is at http://127.0.0.1:9090; its configuration page
 (`/settings`) edits `.env` with every option documented, and shows the
 cameras as a table: each camera's Enabled switch and Download filter
 (Always / Person / Person or vehicle).
+
+To run it in the background instead, use `vdemo` (`vdemo.bat` on Windows, from
+the project folder; `vdemo help` shows the usage):
+
+```bash
+vdemo start      # every service in the background, no window; returns once the console answers
+vdemo stop       # stops them (also a run in a console window)
+vdemo restart
+vdemo status     # exit code 0 = running, 3 = not running
+vdemo console    # in this console, like run.bat (--only / --skip / -v)
+```
+
+Only one instance runs at a time. `GET /api/health` answers 200 when every
+module is OK and 503 otherwise, for outside monitoring. For the Faultguru app
+monitor, copy `docs/faultguru.sample.json` to `.faultguru` in the project folder
+and set `root` (`.faultguru` is not committed).
 
 ## Commands
 
@@ -74,6 +91,7 @@ cameras as a table: each camera's Enabled switch and Download filter
 | command     | what it does |
 |-------------|--------------|
 | `run`       | every service below in one console (`--only webui`, `--skip chat-bot`); restarts a service that crashes |
+| `control`   | `start` / `stop` / `restart` / `status` of `run` in the background (what `vdemo` calls) |
 | `fetch`     | download clips (`--daemon`: keep polling; `--date`, `--camera`, `--list`, `--limit`) |
 | `process`   | analyze and describe queued clips (`--daemon`; `--limit`, `--preserve`, `--redo` for testing) |
 | `notify`    | the chat agent's send / skip decision for each new event (`--daemon`) |

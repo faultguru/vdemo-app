@@ -9,6 +9,7 @@ unless the LAN is trusted; `.env` can only be changed from the PC itself.
   activities they form, the clips still in the pipeline, the live monitor and
   the chat with the analyst.
 - `/settings` (`settings.html`) — the configuration page.
+- `/logo.svg`, `/favicon.ico` — the faultguru logo (made by `brand/make_brand.py`).
 
 ## Code
 
@@ -40,7 +41,8 @@ unless the LAN is trusted; `.env` can only be changed from the PC itself.
 | `GET /api/live/stream/<camera>` | the camera's live view as MJPEG |
 | `GET /api/chat`, `POST /api/chat`, `POST /api/chat/clear` | the console chat (multipart: `text`, `date`, `live`, `files`) |
 | `GET /api/settings`, `POST /api/settings` | the configuration page: options with their `.env` values; `{"changes": {KEY: value or null}}` |
-| `GET /api/security-mode`, `POST /api/security-mode` | the security mode (header dropdown): `{"state": {mode, since, until, by}, "headline", "modes"}`; `{"mode": "normal" / "home" / "away" / "vacation"}` |
+| `GET /api/security-mode`, `POST /api/security-mode` | the security mode (header dropdown): `{"state": {mode, since, until, by, note}, "headline", "modes", "schedule": [{id, mode, start, end, note, text}]}`; `{"mode": "normal" / "home" / "away" / "vacation"}` |
+| `GET /api/health` | 200 when every module is OK, 503 when one is DOWN: `{"status": "OK" / "DOWN", "checked_at", "modules": [{name, type: "service" / "dependency", label, status, description, last_report_at}]}` for fetch, process, notify, chat-bot, blink, telegram, ai (the red banner; usable by an outside monitor) |
 
 Only files inside the media areas (raw, processed, ignored, temp videos, live
 snapshots) are served; anything else, or any path leaving STORAGE_ROOT, is a
@@ -48,8 +50,10 @@ snapshots) are served; anything else, or any path leaving STORAGE_ROOT, is a
 `.env` and the security mode (`state/security_mode.json`).
 
 The header's **HOUSE** dropdown shows and sets the security mode (see
-[chat.md](chat.md#security-mode)); it refreshes every 30 s, so HOME ending at
-`HOME_MODE_UNTIL` or a change from Telegram shows up. Events processed in
+[chat.md](chat.md#security-mode)); it checks every `WEBUI_POLL_SEC` (and when the
+tab comes back into view), so a change made elsewhere — Telegram, the
+chat, auto-away, a schedule, HOME ending at `HOME_MODE_UNTIL` — shows up
+within seconds, without a reload. Events processed in
 AWAY / VACATION carry a `⌂ away` / `⌂ vacation` tag; an indoor clip saved in
 HOME without analysis is a card tagged `⌂ residents home` with a HOME badge
 (thumbnail: the clip's middle frame). Such clips are stitched by time alone,

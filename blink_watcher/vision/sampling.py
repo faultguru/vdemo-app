@@ -41,6 +41,7 @@ from typing import Optional
 import numpy as np
 
 from blink_watcher.core.logs import setup_logging
+from blink_watcher.settings import get_settings
 from blink_watcher.vision.focus import Focus, find_focus, trim_to_focus
 from blink_watcher.vision.motion import MotionSegment, detect_segments
 from blink_watcher.vision.tracks import (
@@ -48,33 +49,35 @@ from blink_watcher.vision.tracks import (
 )
 from blink_watcher.vision.video import encode_jpeg, read_frames, video_info, video_ref
 
+_settings = get_settings()
+
 log = logging.getLogger(__name__)
 
 PROGRAM = "frames"
 MANIFEST = "manifest.json"
 
 # Sampling.
-SPAN_PAD_SEC = 0.5             # extend the focus span this much on both sides
-BASELINE_FPS = 1.0             # evenly spaced context frames across the whole span
-BURST_FPS = 4.0                # frame rate inside a burst
-BURST_HALF_SEC = 0.75          # burst covers trigger +- this many seconds
-BASELINE_NEAR_BURST_SEC = 0.15 # drop a baseline frame this close to a burst frame
-MAX_FRAMES = 48                # cap on frames per clip
-FRAME_MAX_SIDE = 960           # JPEG long side of an uncropped frame - ~700 image tokens at 16:9
+SPAN_PAD_SEC = _settings.sample_span_pad_sec                  # extend the focus span this much on both sides
+BASELINE_FPS = _settings.sample_baseline_fps                  # evenly spaced context frames across the whole span
+BURST_FPS = _settings.sample_burst_fps                        # frame rate inside a burst
+BURST_HALF_SEC = _settings.sample_burst_half_sec              # burst covers trigger +- this many seconds
+BASELINE_NEAR_BURST_SEC = _settings.sample_baseline_near_burst_sec  # drop a baseline frame this close to a burst frame
+MAX_FRAMES = _settings.sample_max_frames                      # cap on frames per clip
+FRAME_MAX_SIDE = _settings.sample_frame_max_side              # JPEG long side of an uncropped frame - ~700 image tokens at 16:9
 TOKENS_PER_PIXEL = 1 / 750     # rough image-token cost: width x height / 750
 
 # Region of interest.
-ROI_PAD_RATIO = 0.20           # pad the ROI by this fraction of its own size per side - keeps the porch/ground around the subject
-ROI_MIN_PAD_RATIO = 0.08       # ...but at least this fraction of the frame's long side, so the scene stays recognizable
-ROI_MIN_SAVING = 0.10          # crop only if it removes at least 10% of the frame area
+ROI_PAD_RATIO = _settings.sample_roi_pad_ratio          # pad the ROI by this fraction of its own size per side - keeps the porch/ground around the subject
+ROI_MIN_PAD_RATIO = _settings.sample_roi_min_pad_ratio  # ...but at least this fraction of the frame's long side, so the scene stays recognizable
+ROI_MIN_SAVING = _settings.sample_roi_min_saving        # crop only if it removes at least 10% of the frame area
 
 # Bend detection.
-STANDING_PERCENTILE = 80       # a track's "standing" box h/w = this percentile over the whole track
-BEND_ASPECT_RATIO = 0.70       # box h/w below this x standing h/w -> bent/crouched (h/w is distance-invariant, raw height is not)
-TOP_MARGIN_RATIO = 0.02        # boxes touching the top edge have the head cut off - false "bend", skip
-EDGE_GUARD_SEC = 1.5           # near a track's start/end, a box touching any edge is a person entering/leaving, not bending - skip
-BEND_MERGE_GAP_SEC = 0.4       # bend samples closer than this belong to the same bend; wider would fuse distinct bends (set-down -> pick-up 1s later)
-TRIGGER_MERGE_SEC = 1.0        # merge triggers closer than this
+STANDING_PERCENTILE = _settings.bend_standing_percentile  # a track's "standing" box h/w = this percentile over the whole track
+BEND_ASPECT_RATIO = _settings.bend_aspect_ratio           # box h/w below this x standing h/w -> bent/crouched (h/w is distance-invariant, raw height is not)
+TOP_MARGIN_RATIO = _settings.bend_top_margin_ratio        # boxes touching the top edge have the head cut off - false "bend", skip
+EDGE_GUARD_SEC = _settings.bend_edge_guard_sec            # near a track's start/end, a box touching any edge is a person entering/leaving, not bending - skip
+BEND_MERGE_GAP_SEC = _settings.bend_merge_gap_sec         # bend samples closer than this belong to the same bend; wider would fuse distinct bends (set-down -> pick-up 1s later)
+TRIGGER_MERGE_SEC = _settings.sample_trigger_merge_sec    # merge triggers closer than this
 
 
 @dataclass

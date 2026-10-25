@@ -8,11 +8,16 @@ up as a None request header, which breaks every token refresh.
 
 Without a usable session, BLINK_USERNAME / BLINK_PASSWORD log in. If Blink then
 asks for 2FA it emails a PIN: re-run with BLINK_2FA_CODE=<pin> set.
+
+Blink changes its login API without notice and blinkpy follows; an older
+blinkpy than MIN_BLINKPY is known to break (its token refresh is rejected with
+a 406 once the first token expires), so connect() logs an error for it.
 """
 from __future__ import annotations
 
 import json
 import logging
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from aiohttp import ClientSession
@@ -24,6 +29,8 @@ from blink_watcher.providers.base import AuthError, TwoFactorRequired
 from blink_watcher.settings import Settings
 
 log = logging.getLogger(__name__)
+
+MIN_BLINKPY = (0, 25, 9)  # keep in step with pyproject.toml
 
 # Fields of blinkpy's Auth kept in the session file.
 SESSION_FIELDS = ("token", "host", "region_id", "client_id", "account_id", "user_id", "unique_id",
@@ -56,6 +63,7 @@ def _persist_session(blink: Blink, path: Path) -> None:
 async def connect(settings: Settings) -> Blink:
     """A started Blink session (networks and cameras loaded). Raises AuthError /
     TwoFactorRequired; the aiohttp session is closed on failure."""
+    _check_blinkpy()
     path = session_file(settings)
     cached = _load_session(path)
     if not cached and not (settings.blink_username and settings.blink_password):
@@ -74,6 +82,17 @@ async def connect(settings: Settings) -> Blink:
              list((blink.networks or {}).keys()), list((blink.cameras or {}).keys()))
     _persist_session(blink, path)
     return blink
+
+
+def _check_blinkpy() -> None:
+    try:
+        installed = version("blinkpy")
+        parts = tuple(int(p) for p in installed.split(".")[:3] if p.isdigit())
+    except (PackageNotFoundError, ValueError):
+        return
+    if parts < MIN_BLINKPY:
+        log.error("blinkpy %s is too old for Blink's current login (need %s or newer): pip install -U blinkpy",
+                  installed, ".".join(map(str, MIN_BLINKPY)))
 
 
 async def _start(blink: Blink, settings: Settings) -> None:

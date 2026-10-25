@@ -10,13 +10,16 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from blink_watcher.settings import get_settings
 from blink_watcher.vision.motion import FLASH_MEAN_DELTA
 from blink_watcher.vision.video import capture_info, open_video
 
-TRIAGE_SAMPLES = 6             # evenly spaced frames decoded
-TRIAGE_MAX_SIDE = 160          # downscale to this - absdiff at tiny resolution is near-free
-TRIAGE_PIXEL_DELTA = 20        # per-pixel intensity delta that counts as "changed"
-TRIAGE_CHANGED_RATIO = 0.005   # changed fraction of pixels between any two samples that counts as real change (0.5%)
+_settings = get_settings()
+
+TRIAGE_SAMPLES = _settings.triage_samples              # evenly spaced frames decoded
+TRIAGE_MAX_SIDE = _settings.triage_max_side            # downscale to this - absdiff at tiny resolution is near-free
+TRIAGE_PIXEL_DELTA = _settings.triage_pixel_delta      # per-pixel intensity delta that counts as "changed"
+TRIAGE_CHANGED_RATIO = _settings.triage_changed_ratio  # changed fraction of pixels between any two samples that counts as real change (0.5%)
 
 
 @dataclass

@@ -33,8 +33,8 @@ appends their results to the transcript and asks again, up to 6 rounds.
 ```
 
 Rounds go to the fast model (`CHAT_AGENT_MODEL`, `CHAT_AGENT_EFFORT`). When a
-round asks for a memory change (`remember`, `forget`, `note_today`,
-`clear_today`), that round is redone by the memory model
+round asks for a memory or security mode change (`STATE_TOOLS`: `remember`,
+`forget`, the day-note writes, the security mode tools), that round is redone by the memory model
 (`CHAT_AGENT_MEMORY_MODEL`, `CHAT_AGENT_MEMORY_EFFORT`), which finishes the
 turn — the stronger model decides what is worth keeping. Every round's
 request is written to `<request dir>/round-<n>[-memory]/` (the provider's
@@ -56,6 +56,8 @@ memory, not in prompts).
 | `send_thumbnail`, `send_video` | send an event's picture / trimmed clip to the user (Telegram, or the browser in the console) |
 | `remember`, `forget` | long-term memory (chat role only) |
 | `note_today`, `clear_today`, `get_day_notes` | day notes (chat role only) |
+| `note_for_date`, `clear_for_date` | day notes of a coming day: something expected tomorrow or later (chat role only) |
+| `set_security_mode`, `schedule_security_mode`, `cancel_security_schedule` | the security mode now (optionally until a time), or planned for a later period |
 
 File paths in events are relative to STORAGE_ROOT and sandboxed: a path
 resolving outside it is refused.
@@ -63,7 +65,10 @@ resolving outside it is refused.
 ## Notifications (`notify`)
 
 `python -m blink_watcher notify --daemon` takes each event from
-`chat/events-inbox/` (oldest recording first):
+`chat/events-inbox/` (today's first, then earlier days' from a catch-up;
+each oldest recording first). An event recorded more than
+`NOTIFY_MAX_AGE_MINUTES` ago (60) is recorded but skips the agent and is
+never alerted, so a catch-up after an outage doesn't send old news:
 
 1. **record** — the event goes into the day's list `chat/<date>/events.json`
    (replacing an entry with the same `event_id`).
@@ -102,7 +107,29 @@ The security mode (`core/security_mode.py`: NORMAL / HOME / AWAY / VACATION) tel
 the agents whether the residents are around. It is set from the console's
 header or the Telegram commands above and kept in
 `STORAGE_ROOT/state/security_mode.json`; HOME turns back to NORMAL at
-`HOME_MODE_UNTIL` (default 23:00), AWAY and VACATION stay until changed.
+`HOME_MODE_UNTIL` (default 23:00), AWAY and VACATION stay until changed —
+unless an end is given. The chat agent sets it from what you say about your
+plans: leaving now with a return time sets AWAY until then; a trip between
+two dates is scheduled (`state/security_mode.schedule.json`) and starts and
+ends on its own. The supervisor applies due changes every minute, Telegram is
+told of each one (not of HOME's nightly end), a manual change always wins,
+and `/mode` and the console's header show what is scheduled.
+
+**Auto-away** (`AUTO_AWAY=true`): for every event the notifier also answers
+`household_vehicle` — `departed` / `arrived` / `none` — matching the vehicle
+in the description against the cars in long-term memory (same inference as
+the alert decision). The video describer is asked to state departures and
+arrivals plainly (who gets in or out, whether the car drives off or parks).
+A departure while the mode is HOME sets AWAY (by `auto-away`); an arrival
+while the mode is AWAY (whoever set it; VACATION is left alone) sets HOME.
+Since a person filter skips the clip of the car itself moving (the camera
+tags it "vehicle" only), the notifier is also given the camera's
+vehicle-only clips within `AUTO_AWAY_CLIP_WINDOW_SEC` of the event, and a
+resident getting out of the household car and walking in counts as an
+arrival. Each change sends its own
+Telegram message (`pipeline.notify.auto_away`); a second camera seeing the
+same departure changes nothing, and a mode set after the event's time is
+left alone.
 Every chat and notification round gets the current mode in its system prompt
 (`## Security mode now`, from `prompts/security_mode.txt`: the mode and what it
 means), and each event carries the mode it was processed in (`security_mode`,
@@ -130,7 +157,10 @@ be read and hand-edited (`chat/memory.py`):
   "expecting a delivery", "ignore the garden today", who has been identified
   today, what was already alerted. One `[HH:MM] <text>` line per entry;
   `note_today` adds, `clear_today` removes by substring. Each day has its own
-  file, so they roll over at midnight by themselves.
+  file, so they roll over at midnight by themselves. Something expected on a
+  later day goes straight into that day's file (`note_for_date`), so it
+  applies when the day comes — an `alert-on:` line included; until then the
+  chat agent sees it under `## Upcoming day notes`.
 
 The chat prompt asks for two structured kinds of day note that the
 notification prompt matches on:

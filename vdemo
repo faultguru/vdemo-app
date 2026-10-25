@@ -1,0 +1,38 @@
+#!/bin/sh
+# vdemo: start / stop / restart the services in the background, or run them in this console.
+# Uses the project's .venv when there is one. "vdemo help" shows the usage.
+cd "$(dirname "$0")" || exit 1
+if [ -x .venv/bin/python ]; then py=.venv/bin/python
+elif [ -x .venv/Scripts/python.exe ]; then py=.venv/Scripts/python.exe
+elif python3 -c "" 2>/dev/null; then py=python3   # on Windows python3 may be the Store placeholder
+else py=python
+fi
+
+usage() {
+    cat <<'EOF'
+usage: vdemo <command> [options]
+
+commands:
+  start     start every service in the background (no window) and return once the
+            web console answers; already running: nothing happens
+  stop      stop the services (the Ctrl+C way; killed after CONTROL_STOP_WAIT_SEC),
+            also one running in a console
+  restart   stop, then start
+  status    running or not (exit code 0 = running, 3 = not running)
+  console   run every service in this console, output shown; Ctrl+C stops
+            options: --only NAMES, --skip NAMES (fetch, process, notify, chat-bot,
+            webui), -v (also other modules' INFO logs)
+  help      this text
+
+Only one instance runs at a time. Logs: STORAGE_ROOT/logs (run.log and one per service).
+Health: http://127.0.0.1:9090/api/health (WEBUI_HOST / WEBUI_PORT).
+EOF
+}
+
+cmd=$1
+case "$cmd" in
+    start|stop|restart|status) exec "$py" -m blink_watcher control "$cmd" ;;
+    console) shift; exec "$py" -m blink_watcher run "$@" ;;
+    ""|help|-h|--help) usage ;;
+    *) echo "vdemo: unknown command \"$cmd\"" >&2; echo >&2; usage >&2; exit 2 ;;
+esac
